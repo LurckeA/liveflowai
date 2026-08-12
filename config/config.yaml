@@ -1,0 +1,21 @@
+# config/config.yaml
+audio:
+  sample_rate: 44100
+  buffer_size: 2.0  # seconds
+  device: null  # Auto-detect
+
+analysis:
+  hop_length: 512
+  n_fft: 2048
+  
+transition:
+  crossfade_time: 0.5  # seconds
+  max_bpm_diff: 10  # BPM
+  
+prediction:
+  model_path: "data/models/predictor.pkl"
+  confidence_threshold: 0.7
+  
+iem:
+  output_device: null  # Auto-detect
+  latency_ms: 5
