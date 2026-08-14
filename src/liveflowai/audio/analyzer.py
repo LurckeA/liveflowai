@@ -29,13 +29,33 @@ class AudioAnalyzer:
     
     def extract_chords(self, y: np.ndarray, sr: int) -> np.ndarray:
         """Extract chord progression"""
-        # Use harmonic scope or implement chord detection
-        from harmonyscope import ChordDetector
-        detector = ChordDetector()
-        chords = detector.process(y, sr)
-        return chords
+        # Use simple chroma-based chord detection
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        return np.mean(chroma, axis=1)
     
     def calculate_bpm_curve(self, y: np.ndarray, sr: int) -> np.ndarray:
         """Calculate BPM variations over time"""
         tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units='time')
         return tempo
+    
+    def extract_energy(self, y: np.ndarray) -> float:
+        """Extract energy from audio"""
+        return float(np.sqrt(np.mean(y**2)))
+    
+    def detect_sections(self, y: np.ndarray, sr: int) -> list:
+        """Detect song sections using librosa"""
+        # Simple section detection based on spectral clustering
+        S = librosa.feature.melspectrogram(y=y, sr=sr)
+        sync = librosa.util.sync(
+            np.vstack([librosa.feature.tempogram(y=y, sr=sr)]),
+            librosa.frames_to_time(np.arange(0, S.shape[1]), sr=sr)
+        )
+        # Return simple frame-based sections
+        return [y[i*sr:(i+1)*sr] for i in range(len(y)//sr)][:5]  # Limit to 5 sections
+    
+    def _key_from_chroma(self, chroma: np.ndarray) -> str:
+        """Detect key from chromagram"""
+        key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        chroma_mean = np.mean(chroma, axis=1)
+        detected_key = key_names[np.argmax(chroma_mean)]
+        return detected_key

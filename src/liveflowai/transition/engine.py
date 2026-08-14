@@ -53,3 +53,23 @@ class TransitionEngine:
                 next_section[:fade_length] * fade_in
         
         return mixed
+    
+    def calculate_bpm_shift(self, current_bpm: float, target_bpm: float) -> float:
+        """Calculate BPM shift ratio for tempo matching"""
+        if current_bpm == 0:
+            return 0.0
+        return target_bpm / current_bpm
+    
+    def match_eq(self, current_energy: float, target_energy: float) -> Dict:
+        """Match EQ profiles between songs"""
+        energy_ratio = target_energy / (current_energy + 1e-6)
+        return {
+            'gain': np.clip(energy_ratio, 0.5, 2.0),
+            'curve': 'smooth'
+        }
+    
+    def calculate_timing(self, current_song: Dict, next_song: Dict) -> float:
+        """Calculate timing offset for smooth transition"""
+        # Simple timing based on song durations
+        current_duration = current_song.get('duration', 180.0)
+        return self.transition_time
