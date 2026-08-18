@@ -1,7 +1,7 @@
 [project]
 name = "liveflowai"
 version = "0.1.0"
-description = "Add your description here"
+description = "LPB 2026 Banten type shi. Research and stuff."
 readme = "README.md"
 authors = [
     { name = "bloggerzz231-jpg", email = "bloggerzz231@gmail.com" }
