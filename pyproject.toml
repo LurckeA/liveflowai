@@ -17,7 +17,8 @@ dependencies = [
     "audioread>=3.0.0",
     "resampy>=0.4.0",
     "cython>=0.25",
-    "mido>=1.2.6"
+    "mido>=1.2.6",
+    "basic-pitch>=0.4.0",
 ]
 
 [project.scripts]
