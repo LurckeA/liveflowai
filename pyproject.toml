@@ -21,6 +21,7 @@ dependencies = [
     "mido>=1.2.6",
     "basic-pitch>=0.4.0",
     "matplotlib>=3.10.9",
+    "ffmpeg-python>=0.2.0",
 ]
 
 [project.scripts]
