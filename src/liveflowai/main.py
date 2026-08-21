@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
+from liveflowai.detection.chord_detector import deteksi_chord
+
 
 def main():
     # Initialize analyzer
