@@ -34,12 +34,17 @@ def main():
         print("\nDetected chords:")  # NEW
         for chord, timestamp in zip(chords, timestamps):  # NEW
             print(f"{timestamp:.2f}s: {chord}")  # NEW
-        
+        chords_string = ', '.join(chords)
         # Database Logic
         DB = DatabaseLogic()
         DB.ConnectDB()
         DB.MakeDB()
-        DB.PushDB(result['tempo_bpm'], result['duration'], confidence['confidence_score'], chord)
+        DB.PushDB(
+            file_path.name, 
+            result['duration'], 
+            result['tempo_bpm'], 
+            chords_string
+        )
 
         # Detect chords live from microphone
         chord_detector.start_detection()
