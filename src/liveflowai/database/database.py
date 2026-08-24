@@ -25,7 +25,7 @@ def PushDB(song, bpm, chords):
     conn = ConnectDB()
     c = conn.cursor()
 
-    c.execute('INSERT INTO liveflow VALUES (?, ?, ?)', (song, bpm, chords)
+    c.execute('INSERT INTO liveflow VALUES (?, ?, ?)', (song, bpm, chords))
     
     conn.commit()
     conn.close()
