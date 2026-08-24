@@ -28,7 +28,6 @@ def main():
         # Visualize
         analyzer.visualize_tempo(file_path)
         
-<<<<<<< HEAD
          # Detect chords  # NEW
         chords, timestamps = chord_detector.detect_from_file(file_path)  # NEW
         
@@ -40,13 +39,11 @@ def main():
         DB = DatabaseLogic()
         DB.ConnectDB()
         DB.MakeDB()
-        DB.PushDB( {result['tempo_bpm']:.2f}, {result['duration']:.2f}, {result['dudration']:.2f}, {chord} )
-        
-=======
+        DB.PushDB(result['tempo_bpm'], result['duration'], confidence['confidence_score'], chord)
+
         # Detect chords live from microphone
-        chord_detector.start_detection()       
->>>>>>> 8a8741760faae6918ac70f7d3e52c7e5b86cb4f2
-        
+        chord_detector.start_detection()
+
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
