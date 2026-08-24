@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
-
+from liveflowai.database.database import DatabaseLogic
 
 def main():
     # Initialize analyzer
@@ -27,7 +27,6 @@ def main():
         
         # Visualize
         analyzer.visualize_tempo(file_path)
-
         
          # Detect chords  # NEW
         chords, timestamps = chord_detector.detect_from_file(file_path)  # NEW
@@ -35,7 +34,13 @@ def main():
         print("\nDetected chords:")  # NEW
         for chord, timestamp in zip(chords, timestamps):  # NEW
             print(f"{timestamp:.2f}s: {chord}")  # NEW
-            
+        
+        # Database Logic
+        DB = DatabaseLogic()
+        DB.ConnectDB()
+        DB.MakeDB()
+        DB.PushDB( {result['tempo_bpm']:.2f}, {result['duration']:.2f}, {result['dudration']:.2f}, {chord} )
+        
         
     except Exception as e:
         print(f"Error: {e}")

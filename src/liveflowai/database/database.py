@@ -1,31 +1,40 @@
 from pathlib import Path
 import sqlite3
 
+class DatabaseLogic:
+    def __init__(self):
+        pass
 
-def ConnectDB():
-    db_path = Path(__file__).resolve().parents[2] / "data" / "liveflow.db"
-    print(f"Creating/opening: {db_path}")
+    def ConnectDB(self):
+        db_path = Path(__file__).resolve().parents[2] / "data" / "liveflow.db"
+        print(f"Creating/opening: {db_path}")
 
-    return sqlite3.connect(db_path)
+        return sqlite3.connect(db_path)
 
-def MakeDB():
-    conn = ConnectDB()
-    c = conn.cursor()
-    
-    c.execute('''CREATE TABLE liveflow (
-    song text primary key
-    bpm integer
-    chords text
-    )''')
-    
-    conn.commit()
-    conn.close()
+    def MakeDB(self):
+        conn = ConnectDB()
+        c = conn.cursor()
+        
+        c.execute('''CREATE TABLE liveflow (
+        song text primary key
+        duration text
+        bpm integer
+        chords text
+        )''')
+        
+        conn.commit()
+        conn.close()
 
-def PushDB(song, bpm, chords):
-    conn = ConnectDB()
-    c = conn.cursor()
+    def PushDB(self, song, duration, bpm, chords):
+        self.song = song
+        self.duration = duration
+        self.bpm = bpm
+        self.chords = chords
 
-    c.execute('INSERT INTO liveflow VALUES (?, ?, ?)', (song, bpm, chords))
-    
-    conn.commit()
-    conn.close()
+        conn = ConnectDB()
+        c = conn.cursor()
+
+        c.execute('INSERT INTO liveflow VALUES (?, ?, ?, ?)', (song, duration, bpm, chords))
+        
+        conn.commit()
+        conn.close()
