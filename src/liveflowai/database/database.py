@@ -12,18 +12,18 @@ class DatabaseLogic:
         return sqlite3.connect(db_path)
 
     def MakeDB(self):
-        conn = ConnectDB()
-        c = conn.cursor()
-        
-        c.execute('''CREATE TABLE liveflow (
-        song text primary key
-        duration text
-        bpm integer
-        chords text
-        )''')
-        
-        conn.commit()
-        conn.close()
+        with self.ConnectDB() as conn:
+            c = conn.cursor()
+            
+            c.execute('''CREATE TABLE liveflow (
+            song text primary key
+            duration text
+            bpm integer
+            chords text
+            )''')
+            
+            conn.commit()
+            conn.close()
 
     def PushDB(self, song, duration, bpm, chords):
         self.song = song
@@ -31,10 +31,10 @@ class DatabaseLogic:
         self.bpm = bpm
         self.chords = chords
 
-        conn = ConnectDB()
-        c = conn.cursor()
+        with self.ConnectDB() as conn:
+            c = conn.cursor()
 
-        c.execute('INSERT INTO liveflow VALUES (?, ?, ?, ?)', (song, duration, bpm, chords))
-        
-        conn.commit()
-        conn.close()
+            c.execute('INSERT INTO liveflow VALUES (?, ?, ?, ?)', (song, duration, bpm, chords))
+            
+            conn.commit()
+            conn.close()
