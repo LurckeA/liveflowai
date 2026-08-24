@@ -29,13 +29,8 @@ def main():
         analyzer.visualize_tempo(file_path)
 
         
-         # Detect chords  # NEW
-        chords, timestamps = chord_detector.detect_from_file(file_path)  # NEW
-        
-        print("\nDetected chords:")  # NEW
-        for chord, timestamp in zip(chords, timestamps):  # NEW
-            print(f"{timestamp:.2f}s: {chord}")  # NEW
-            
+        # Detect chords live from microphone
+        chord_detector.start_detection()       
         
     except Exception as e:
         print(f"Error: {e}")
