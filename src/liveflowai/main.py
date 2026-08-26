@@ -2,7 +2,9 @@
 
 import sys
 from pathlib import Path
+
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
+from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
 from liveflowai.database.database import DatabaseLogic
 
@@ -35,6 +37,7 @@ def main():
         for chord, timestamp in zip(chords, timestamps):  # NEW
             print(f"{timestamp:.2f}s: {chord}")  # NEW
         chords_string = ', '.join(chords)
+        
         # Database Logic
         DB = DatabaseLogic()
         DB.ConnectDB()
@@ -43,7 +46,7 @@ def main():
             file_path.name, 
             result['duration'], 
             result['tempo_bpm'], 
-            chords_string
+            chords_string  
         )
 
         # Detect chords live from microphone
