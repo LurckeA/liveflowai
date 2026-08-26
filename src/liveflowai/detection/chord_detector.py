@@ -1,5 +1,3 @@
-# src/liveflowai/detection/chord_detector.py
-
 import queue
 from collections import deque
 

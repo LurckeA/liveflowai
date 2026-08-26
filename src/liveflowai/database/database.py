@@ -1,5 +1,3 @@
-# src/liveflowai/database/database.py
-
 from pathlib import Path
 import sqlite3
 
