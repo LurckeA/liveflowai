@@ -22,7 +22,7 @@ class AudioFileSelector:
         """
         if base_dir is None:
             # Get project root (3 levels up from this file's location)
-            self.project_root = Path(__file__).resolve().parents[2]
+            self.project_root = Path(__file__).resolve().parents[3]
         else:
             self.project_root = Path(base_dir).resolve()
         
