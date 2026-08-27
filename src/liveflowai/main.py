@@ -16,27 +16,7 @@ def main():
     chord_analyzer = ChordAnalyzer(sample_rate=22050)  # NEW
     chord_detector = LiveChordDetector(sample_rate=22050)  # NEW
     
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]    def FetchAllDB(self):
-        try:
-            with self.ConnectDB() as conn:
-                c = conn.cursor()
-                
-                c.execute('SELECT * FROM liveflow')
-                results = c.fetchall()
-                
-                
-                if results:
-                    print(f"Found {len(results)} result(s):")
-                    for row in results:
-                        print(f"  Song: {row[0]}, Duration: {row[1]}, BPM: {row[2]}, Chords: {row[3]}")
-                else:
-                    print(f"Nothing in database.")
-                
-                return results
-                
-        except Exception as e:
-            print(f"Error fetching from DB: {e}")
-            return []  # Return empty list instead of exiting
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
     AUDIO_DIR = PROJECT_ROOT / "data" / "songs"
     file_path = AUDIO_DIR / "Mary Had a Little Lamb.mp3"
     
