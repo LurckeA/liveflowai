@@ -6,15 +6,17 @@ from pathlib import Path
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
-from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.database.database import DatabaseLogic
+
 
 def main():
     # Initialize analyzer
     analyzer = TempoAnalyzer(sample_rate=22050)
-    chord_analyzer = ChordAnalyzer(sample_rate=22050)  # NEW
-    chord_detector = LiveChordDetector(sample_rate=22050)  # NEW
+    chord_analyzer = ChordAnalyzer(sample_rate=22050)
+    live_detector = LiveChordDetector(sample_rate=22050)
+
     
+
     PROJECT_ROOT = Path(__file__).resolve().parents[2]
     AUDIO_DIR = PROJECT_ROOT / "data" / "songs"
     file_path = AUDIO_DIR / "Mary Had a Little Lamb.mp3"
@@ -28,17 +30,26 @@ def main():
         # Get confidence metrics
         confidence = analyzer.get_beat_confidence(file_path)
         print(f"Confidence score: {confidence['confidence_score']:.2f}")
+
+        # ADDED: Detect chords
+        chords = chord_analyzer.analyze_chords(file_path)
+
+        print("\nDetected Chords:")
+        for chord in chords:
+            print(
+                f"{chord.timestamp:.2f}s - "
+                f"{chord.timestamp + chord.duration:.2f}s: "
+                f"{chord} "
+                f"(confidence: {chord.confidence:.2%})"
+            )
+
+        # ADDED: Convert chords for database storage
+        chords_string = ", ".join(str(chord) for chord in chords)
         
         # Visualize
         analyzer.visualize_tempo(file_path)
         
-         # Detect chords  # NEW
-        chords, timestamps = chord_analyzer.detect_from_file(file_path)  # NEW
-        
-        print("\nDetected chords:")  # NEW 
-        for chord, timestamp in zip(chords, timestamps):  # NEW
-            print(f"{timestamp:.2f}s: {chord}")  # NEW
-        chords_string = ', '.join(chords)
+        live_detector.start_detection()
         
         # Database Logic
         DB = DatabaseLogic()
@@ -50,32 +61,6 @@ def main():
             result['tempo_bpm'], 
             chords_string  
         )
-
-        # Detect chords live from microphone
-        chord_analyzer.start_analyzer()
-
-        print("\nAnalyzing chord changes...")
-
-        chord_changes = chord_analyzer.analyze_file(file_path)
-
-        chords = [change["chord"] for change in chord_changes]
-
-        print("\nDetected chord changes:")
-
-        for change in chord_changes:
-            print(
-                f"{change['start_time']:.2f}s - "
-                f"{change['end_time']:.2f}s: "
-                f"{change['chord']} "
-                f"({change['confidence']:.2%})"
-            )
-                    # Detect chords
-        chords, timestamps = chord_detector.detect_from_file(file_path)
-        
-        print("\nDetected chords:")
-        for chord, timestamp in zip(chords, timestamps):
-            print(f"{timestamp:.2f}s: {chord}")
-
 
     except Exception as e:
         print(f"Error: {e}")

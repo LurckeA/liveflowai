@@ -26,6 +26,7 @@ dependencies = [
     "typing>=3.10.0.0",
     "pyaudio>=0.2.14",
     "pytest>=9.1.1",
+    "sounddevice>=0.5.5",
 ]
 
 [project.scripts]

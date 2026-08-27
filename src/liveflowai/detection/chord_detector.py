@@ -1,486 +1,903 @@
-import numpy as np
+import queue
+import time
+from collections import Counter, deque
+from typing import Optional, Tuple
+
 import librosa
-from collections import Counter
+import numpy as np
+import sounddevice as sd
 
 
 class LiveChordDetector:
     """
-    Analyze chord changes from an audio file.
+    Real-time microphone chord detector.
 
-    Detects 12 major chords and 12 minor chords and attempts
-    to produce clean, non-overlapping chord sections.
+    Detection pipeline:
+
+    Microphone
+        ↓
+    Audio buffer
+        ↓
+    Harmonic/percussive separation
+        ↓
+    Chroma extraction
+        ↓
+    Basic chord detection
+        ↓
+    Conservative complex chord refinement
+        ↓
+    Temporal smoothing
+        ↓
+    Stable live chord output
     """
+
+    PITCH_CLASSES = [
+        "C", "C#", "D", "D#", "E", "F",
+        "F#", "G", "G#", "A", "A#", "B",
+    ]
+
+    BASIC_CHORDS = {
+        "major": [0, 4, 7],
+        "minor": [0, 3, 7],
+    }
+
+    SPECIAL_CHORDS = {
+        "sus2": [0, 2, 7],
+        "sus4": [0, 5, 7],
+        "dim": [0, 3, 6],
+        "aug": [0, 4, 8],
+    }
+
+    # Conservative complex chord rules.
+    MAJOR_REFINEMENTS = {
+        "maj7": {
+            "extra_notes": [11],
+            "required_strength": 0.14,
+            "required_ratio": 0.45,
+        },
+        "7": {
+            "extra_notes": [10],
+            "required_strength": 0.14,
+            "required_ratio": 0.45,
+        },
+        "6": {
+            "extra_notes": [9],
+            "required_strength": 0.15,
+            "required_ratio": 0.50,
+        },
+        "add9": {
+            "extra_notes": [2],
+            "required_strength": 0.16,
+            "required_ratio": 0.55,
+        },
+        "9": {
+            "extra_notes": [10, 2],
+            "required_strength": 0.14,
+            "required_ratio": 0.50,
+        },
+    }
+
+    MINOR_REFINEMENTS = {
+        "m7": {
+            "extra_notes": [10],
+            "required_strength": 0.14,
+            "required_ratio": 0.45,
+        },
+        "m6": {
+            "extra_notes": [9],
+            "required_strength": 0.15,
+            "required_ratio": 0.50,
+        },
+        "madd9": {
+            "extra_notes": [2],
+            "required_strength": 0.16,
+            "required_ratio": 0.55,
+        },
+        "m9": {
+            "extra_notes": [10, 2],
+            "required_strength": 0.14,
+            "required_ratio": 0.50,
+        },
+    }
 
     def __init__(
         self,
-        sample_rate=22050,
-        window_seconds=1.5,
-        hop_seconds=0.5,
-        confidence_threshold=0.35,
-        min_chord_duration=1.0,
+        sample_rate: int = 22050,
+        block_size: int = 2048,
+        analysis_duration: float = 1.0,
+        silence_threshold: float = 0.01,
+        minimum_confidence: float = 0.45,
+        refinement_margin: float = 0.10,
+        history_size: int = 5,
     ):
         self.sample_rate = sample_rate
-        self.window_seconds = window_seconds
-        self.hop_seconds = hop_seconds
-        self.confidence_threshold = confidence_threshold
-        self.min_chord_duration = min_chord_duration
+        self.block_size = block_size
+        self.analysis_duration = analysis_duration
+        self.silence_threshold = silence_threshold
+        self.minimum_confidence = minimum_confidence
+        self.refinement_margin = refinement_margin
 
-        self.n_fft = 2048
-        self.hop_length = 512
+        self.audio_queue = queue.Queue()
 
-        self.pitch_classes = [
-            "C", "C#", "D", "D#", "E", "F",
-            "F#", "G", "G#", "A", "A#", "B"
+        self.audio_buffer = deque(
+            maxlen=int(
+                self.sample_rate
+                * self.analysis_duration
+            )
+        )
+
+        self.prediction_history = deque(
+            maxlen=history_size
+        )
+
+        self.current_chord = None
+        self.current_confidence = 0.0
+
+        self.is_running = False
+
+        self.last_print_time = 0.0
+
+        print(
+            "LiveChordDetector initialized "
+            f"(sample_rate={self.sample_rate})"
+        )
+
+    # ============================================================
+    # MICROPHONE CALLBACK
+    # ============================================================
+
+    def _audio_callback(
+        self,
+        indata,
+        frames,
+        time_info,
+        status,
+    ):
+        """Receive microphone audio."""
+
+        if status:
+            print(f"Audio status: {status}")
+
+        audio_data = indata[:, 0].copy()
+
+        self.audio_queue.put(audio_data)
+
+    # ============================================================
+    # CREATE CHORD TEMPLATE
+    # ============================================================
+
+    def _create_template(
+        self,
+        root: int,
+        intervals: list,
+    ) -> np.ndarray:
+        """Create a normalized chord template."""
+
+        template = np.zeros(
+            12,
+            dtype=np.float32,
+        )
+
+        for position, interval in enumerate(intervals):
+            note = (root + interval) % 12
+
+            if position == 0:
+                # Give the root slightly more importance.
+                template[note] = 1.0
+            else:
+                template[note] = 0.9
+
+        norm = np.linalg.norm(template)
+
+        if norm > 1e-8:
+            template /= norm
+
+        return template
+
+    # ============================================================
+    # SCORE CHORD TEMPLATE
+    # ============================================================
+
+    def _template_score(
+        self,
+        chroma: np.ndarray,
+        root: int,
+        intervals: list,
+    ) -> float:
+        """Calculate how well a chord matches the chroma."""
+
+        template = self._create_template(
+            root,
+            intervals,
+        )
+
+        chroma_norm = np.linalg.norm(chroma)
+
+        if chroma_norm < 1e-8:
+            return 0.0
+
+        similarity = float(
+            np.dot(chroma, template)
+            / (
+                chroma_norm
+                * np.linalg.norm(template)
+                + 1e-8
+            )
+        )
+
+        chord_notes = [
+            (root + interval) % 12
+            for interval in intervals
         ]
 
-        self.chord_templates = self._create_chord_templates()
-
-        print("Chord Analyzer initialized!")
-        print(f"Sample Rate: {self.sample_rate} Hz")
-        print(f"Chord Templates: {len(self.chord_templates)}")
-
-    def _create_chord_templates(self):
-        """
-        Create templates for:
-
-        - 12 major chords
-        - 12 minor chords
-        """
-
-        templates = {}
-
-        chord_types = {
-            "": [0, 4, 7],   # Major
-            "m": [0, 3, 7],  # Minor
-        }
-
-        for root_index, root_name in enumerate(self.pitch_classes):
-            for suffix, intervals in chord_types.items():
-
-                template = np.zeros(12, dtype=np.float32)
-
-                for interval in intervals:
-                    note_index = (root_index + interval) % 12
-                    template[note_index] = 1.0
-
-                # Normalize the template
-                norm = np.linalg.norm(template)
-
-                if norm > 0:
-                    template /= norm
-
-                chord_name = f"{root_name}{suffix}"
-
-                templates[chord_name] = template
-
-        return templates
-
-    def _detect_chord(self, chroma_vector):
-        """
-        Compare one chroma vector against all chord templates.
-        """
-
-        if chroma_vector is None:
-            return "None", 0.0
-
-        norm = np.linalg.norm(chroma_vector)
-
-        if norm == 0:
-            return "None", 0.0
-
-        chroma_vector = chroma_vector / norm
-
-        scores = {}
-
-        for chord_name, template in self.chord_templates.items():
-
-            score = np.dot(chroma_vector, template)
-
-            scores[chord_name] = float(score)
-
-        best_chord = max(scores, key=scores.get)
-        best_score = scores[best_chord]
-
-        # Reject weak matches
-        if best_score < self.confidence_threshold:
-            return "None", best_score
-
-        return best_chord, best_score
-
-    def _get_window_chroma(self, audio_window):
-        """
-        Extract the average chroma vector from one audio window.
-        """
-
-        if len(audio_window) == 0:
-            return None
-
-        # Ignore silence
-        rms = np.sqrt(np.mean(audio_window ** 2))
-
-        if rms < 0.01:
-            return None
-
-        # Make sure the window is large enough for STFT
-        if len(audio_window) < self.n_fft:
-
-            audio_window = np.pad(
-                audio_window,
-                (0, self.n_fft - len(audio_window)),
-            )
-
-        # Keep mainly harmonic content
-        harmonic_audio = librosa.effects.harmonic(
-            audio_window
+        chord_energy = float(
+            np.sum(chroma[chord_notes])
         )
 
-        chroma = librosa.feature.chroma_stft(
-            y=harmonic_audio,
-            sr=self.sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            n_chroma=12,
+        root_energy = float(chroma[root])
+
+        outside_notes = [
+            note
+            for note in range(12)
+            if note not in chord_notes
+        ]
+
+        outside_energy = float(
+            np.sum(chroma[outside_notes])
         )
 
-        if chroma.size == 0:
+        score = (
+            0.55 * similarity
+            + 0.30 * chord_energy
+            + 0.15 * root_energy
+            - 0.08 * outside_energy
+        )
+
+        return float(score)
+
+    # ============================================================
+    # EXTRACT LIVE CHROMA
+    # ============================================================
+
+    def _extract_chroma(
+        self,
+        audio: np.ndarray,
+    ) -> Optional[np.ndarray]:
+        """Convert microphone audio into a chroma vector."""
+
+        if len(audio) < 1024:
             return None
 
-        chroma_vector = np.mean(chroma, axis=1)
+        rms = float(
+            np.sqrt(
+                np.mean(audio ** 2)
+            )
+        )
 
-        return chroma_vector
+        # Silence.
+        if rms < self.silence_threshold:
+            return None
 
-    def _smooth_predictions(self, predictions):
-        """
-        Smooth noisy chord predictions.
+        # Remove DC offset.
+        audio = audio - np.mean(audio)
 
-        Each prediction is replaced by the most common chord
-        in its nearby neighborhood.
-        """
+        peak = np.max(np.abs(audio))
 
-        if not predictions:
-            return []
+        if peak > 1e-8:
+            audio = audio / peak
 
-        smoothed = []
-
-        radius = 2
-
-        for index, prediction in enumerate(predictions):
-
-            start = max(0, index - radius)
-            end = min(
-                len(predictions),
-                index + radius + 1,
+        try:
+            # Reduce drums/percussion.
+            harmonic_audio, _ = librosa.effects.hpss(
+                audio
             )
 
-            neighborhood = predictions[start:end]
+            chroma = librosa.feature.chroma_stft(
+                y=harmonic_audio,
+                sr=self.sample_rate,
+                n_fft=2048,
+                hop_length=512,
+                n_chroma=12,
+            )
 
-            valid_chords = [
-                item["chord"]
-                for item in neighborhood
-                if item["chord"] != "None"
-            ]
+            chroma_vector = np.mean(
+                chroma,
+                axis=1,
+            )
 
-            if not valid_chords:
+            total = np.sum(chroma_vector)
 
-                smoothed.append({
-                    **prediction,
-                    "chord": "None",
-                    "confidence": 0.0,
-                })
+            if total < 1e-8:
+                return None
 
+            chroma_vector = (
+                chroma_vector / total
+            )
+
+            return chroma_vector.astype(
+                np.float32
+            )
+
+        except Exception as error:
+            print(
+                f"Chroma extraction error: {error}"
+            )
+            return None
+
+    # ============================================================
+    # STAGE 1: DETECT BASIC MAJOR/MINOR CHORD
+    # ============================================================
+
+    def _detect_basic_chord(
+        self,
+        chroma: np.ndarray,
+    ) -> Tuple[int, str, float]:
+        """
+        First detect only a basic major/minor chord.
+
+        Examples:
+            D
+            Dm
+
+        Not yet:
+            D9
+            Dmaj7
+            Dm7
+        """
+
+        best_root = 0
+        best_family = "major"
+        best_score = -np.inf
+
+        for root in range(12):
+            for family, intervals in (
+                self.BASIC_CHORDS.items()
+            ):
+                score = self._template_score(
+                    chroma,
+                    root,
+                    intervals,
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_root = root
+                    best_family = family
+
+        return (
+            best_root,
+            best_family,
+            float(best_score),
+        )
+
+    # ============================================================
+    # STAGE 2: CHECK SPECIAL CHORDS
+    # ============================================================
+
+    def _detect_special_chord(
+        self,
+        chroma: np.ndarray,
+        root: int,
+        basic_score: float,
+    ) -> Optional[Tuple[str, float]]:
+        """
+        Check sus2, sus4, diminished and augmented chords.
+
+        A special chord must beat the basic chord clearly.
+        """
+
+        best_name = None
+        best_score = basic_score
+
+        for name, intervals in (
+            self.SPECIAL_CHORDS.items()
+        ):
+            score = self._template_score(
+                chroma,
+                root,
+                intervals,
+            )
+
+            if (
+                score
+                > best_score
+                + self.refinement_margin
+            ):
+                best_score = score
+                best_name = name
+
+        if best_name is None:
+            return None
+
+        return (
+            best_name,
+            float(best_score),
+        )
+
+    # ============================================================
+    # STAGE 3: CONSERVATIVE COMPLEX REFINEMENT
+    # ============================================================
+
+    def _refine_chord(
+        self,
+        chroma: np.ndarray,
+        root: int,
+        family: str,
+        basic_score: float,
+    ) -> Tuple[str, float]:
+        """
+        Upgrade a basic chord only with strong evidence.
+
+        Example:
+
+            Basic result:
+                D
+
+            Possible refinements:
+                D7
+                Dmaj7
+                D6
+                Dadd9
+                D9
+
+            D9 requires both C and E to be clearly present.
+        """
+
+        root_name = self.PITCH_CLASSES[root]
+
+        # --------------------------------------------------------
+        # CHECK SPECIAL CHORDS FIRST
+        # --------------------------------------------------------
+
+        special = self._detect_special_chord(
+            chroma,
+            root,
+            basic_score,
+        )
+
+        if special is not None:
+            name, score = special
+
+            return (
+                f"{root_name}{name}",
+                score,
+            )
+
+        # --------------------------------------------------------
+        # SELECT BASIC CHORD
+        # --------------------------------------------------------
+
+        if family == "major":
+            basic_intervals = [0, 4, 7]
+            refinements = self.MAJOR_REFINEMENTS
+            best_name = root_name
+
+        else:
+            basic_intervals = [0, 3, 7]
+            refinements = self.MINOR_REFINEMENTS
+            best_name = f"{root_name}m"
+
+        best_score = basic_score
+
+        # --------------------------------------------------------
+        # CALCULATE MAIN CHORD ENERGY
+        # --------------------------------------------------------
+
+        basic_notes = [
+            (root + interval) % 12
+            for interval in basic_intervals
+        ]
+
+        basic_energy = float(
+            np.mean(chroma[basic_notes])
+        )
+
+        # --------------------------------------------------------
+        # TEST COMPLEX CHORDS
+        # --------------------------------------------------------
+
+        for name, config in refinements.items():
+
+            extra_notes = config["extra_notes"]
+
+            required_strength = (
+                config["required_strength"]
+            )
+
+            required_ratio = (
+                config["required_ratio"]
+            )
+
+            extra_strengths = []
+
+            for interval in extra_notes:
+                note = (
+                    root + interval
+                ) % 12
+
+                extra_strengths.append(
+                    float(chroma[note])
+                )
+
+            # ----------------------------------------------------
+            # RULE 1:
+            #
+            # EVERY extension note must be strong enough.
+            #
+            # D9:
+            # D F# A C E
+            #
+            # Both C and E are required.
+            # ----------------------------------------------------
+
+            if any(
+                strength < required_strength
+                for strength in extra_strengths
+            ):
                 continue
 
-            chord_counts = Counter(valid_chords)
-
-            most_common_chord, count = (
-                chord_counts.most_common(1)[0]
+            average_extra_strength = float(
+                np.mean(extra_strengths)
             )
 
-            # Get confidence scores for this chord
+            # ----------------------------------------------------
+            # RULE 2:
+            #
+            # Extra notes must be strong relative to the basic
+            # chord tones.
+            #
+            # This prevents a harmonic or microphone noise from
+            # turning D into D9.
+            # ----------------------------------------------------
+
+            if basic_energy > 1e-8:
+                extension_ratio = (
+                    average_extra_strength
+                    / basic_energy
+                )
+
+                if (
+                    extension_ratio
+                    < required_ratio
+                ):
+                    continue
+
+            # ----------------------------------------------------
+            # RULE 3:
+            #
+            # Full complex chord template must actually score well.
+            # ----------------------------------------------------
+
+            full_intervals = (
+                basic_intervals
+                + extra_notes
+            )
+
+            full_score = self._template_score(
+                chroma,
+                root,
+                full_intervals,
+            )
+
+            # ----------------------------------------------------
+            # RULE 4:
+            #
+            # Complex chord must beat the simple chord.
+            # ----------------------------------------------------
+
+            if (
+                full_score
+                <= best_score
+                + self.refinement_margin
+            ):
+                continue
+
+            # Complex chord accepted.
+            best_score = full_score
+
+            best_name = (
+                f"{root_name}{name}"
+            )
+
+        return (
+            best_name,
+            float(best_score),
+        )
+
+    # ============================================================
+    # DETECT ONE CHORD
+    # ============================================================
+
+    def _detect_chord(
+        self,
+        chroma: np.ndarray,
+    ) -> Tuple[Optional[str], float]:
+        """Run the complete chord detection pipeline."""
+
+        if chroma is None:
+            return None, 0.0
+
+        # Stage 1.
+        root, family, basic_score = (
+            self._detect_basic_chord(chroma)
+        )
+
+        # Stage 2 + 3.
+        chord_name, score = self._refine_chord(
+            chroma,
+            root,
+            family,
+            basic_score,
+        )
+
+        confidence = float(
+            np.clip(
+                score,
+                0.0,
+                1.0,
+            )
+        )
+
+        if (
+            confidence
+            < self.minimum_confidence
+        ):
+            return None, confidence
+
+        return chord_name, confidence
+
+    # ============================================================
+    # SMOOTH LIVE PREDICTIONS
+    # ============================================================
+
+    def _smooth_prediction(
+        self,
+        chord: Optional[str],
+        confidence: float,
+    ) -> Tuple[Optional[str], float]:
+        """
+        Require a chord to appear repeatedly before changing
+        the displayed chord.
+
+        This reduces:
+            C -> G -> C -> Am -> C
+
+        false rapid changes.
+        """
+
+        # Silence or uncertain audio:
+        # keep the previous stable chord.
+        if chord is None:
+            return (
+                self.current_chord,
+                self.current_confidence,
+            )
+
+        self.prediction_history.append(
+            (chord, confidence)
+        )
+
+        # Need several predictions before changing.
+        if len(self.prediction_history) < 3:
+            if self.current_chord is None:
+                self.current_chord = chord
+                self.current_confidence = confidence
+
+            return (
+                self.current_chord,
+                self.current_confidence,
+            )
+
+        chord_names = [
+            item[0]
+            for item in self.prediction_history
+        ]
+
+        counts = Counter(chord_names)
+
+        most_common_chord, count = (
+            counts.most_common(1)[0]
+        )
+
+        # Require majority agreement.
+        required_votes = max(
+            2,
+            len(self.prediction_history) // 2 + 1,
+        )
+
+        if count >= required_votes:
             matching_confidences = [
-                item["confidence"]
-                for item in neighborhood
-                if item["chord"] == most_common_chord
+                item[1]
+                for item in self.prediction_history
+                if item[0] == most_common_chord
             ]
 
             average_confidence = float(
                 np.mean(matching_confidences)
             )
 
-            smoothed.append({
-                **prediction,
-                "chord": most_common_chord,
-                "confidence": average_confidence,
-            })
+            self.current_chord = (
+                most_common_chord
+            )
 
-        return smoothed
+            self.current_confidence = (
+                average_confidence
+            )
 
-    def _create_non_overlapping_sections(
+        return (
+            self.current_chord,
+            self.current_confidence,
+        )
+
+    # ============================================================
+    # START LIVE DETECTION
+    # ============================================================
+
+    def start_detection(
         self,
-        predictions,
-        audio_duration,
+        duration: Optional[float] = None,
+        device=None,
     ):
         """
-        Convert overlapping analysis windows into clean,
-        non-overlapping chord sections.
+        Start detecting chords from the microphone.
+
+        Parameters
+        ----------
+        duration:
+            Number of seconds to listen.
+            None means run until Ctrl+C.
+
+        device:
+            Microphone device ID or None for the default microphone.
         """
 
-        if not predictions:
-            return []
+        self.is_running = True
 
-        sections = []
+        self.audio_buffer.clear()
+        self.prediction_history.clear()
 
-        current_chord = predictions[0]["chord"]
-        current_start = predictions[0]["center_time"]
-        confidence_values = [
-            predictions[0]["confidence"]
-        ]
+        start_time = time.time()
 
-        for prediction in predictions[1:]:
+        print("\n🎸 Live chord detection started.")
+        print("Play your instrument into the microphone.")
+        print("Press Ctrl+C to stop.\n")
 
-            chord = prediction["chord"]
-            center_time = prediction["center_time"]
+        try:
+            with sd.InputStream(
+                samplerate=self.sample_rate,
+                blocksize=self.block_size,
+                channels=1,
+                dtype="float32",
+                callback=self._audio_callback,
+                device=device,
+            ):
+                while self.is_running:
 
-            if chord == current_chord:
+                    # Stop after requested duration.
+                    if (
+                        duration is not None
+                        and time.time() - start_time
+                        >= duration
+                    ):
+                        break
 
-                confidence_values.append(
-                    prediction["confidence"]
-                )
+                    try:
+                        audio_block = (
+                            self.audio_queue.get(
+                                timeout=0.1
+                            )
+                        )
 
-            else:
+                    except queue.Empty:
+                        continue
 
-                # Save previous section
-                if current_chord != "None":
-
-                    average_confidence = float(
-                        np.mean(confidence_values)
+                    # Add microphone samples to rolling buffer.
+                    self.audio_buffer.extend(
+                        audio_block
                     )
 
-                    sections.append({
-                        "start_time": current_start,
-                        "end_time": center_time,
-                        "chord": current_chord,
-                        "confidence": average_confidence,
-                    })
+                    required_samples = int(
+                        self.sample_rate
+                        * self.analysis_duration
+                    )
 
-                # Start new section
-                current_chord = chord
-                current_start = center_time
+                    # Wait until enough audio is available.
+                    if (
+                        len(self.audio_buffer)
+                        < required_samples
+                    ):
+                        continue
 
-                confidence_values = [
-                    prediction["confidence"]
-                ]
+                    audio = np.array(
+                        self.audio_buffer,
+                        dtype=np.float32,
+                    )
 
-        # Add final section
-        if current_chord != "None":
+                    # Extract chroma.
+                    chroma = self._extract_chroma(
+                        audio
+                    )
 
-            average_confidence = float(
-                np.mean(confidence_values)
+                    # Detect chord.
+                    chord, confidence = (
+                        self._detect_chord(chroma)
+                    )
+
+                    # Smooth results.
+                    stable_chord, stable_confidence = (
+                        self._smooth_prediction(
+                            chord,
+                            confidence,
+                        )
+                    )
+
+                    # Print periodically.
+                    now = time.time()
+
+                    if (
+                        now - self.last_print_time
+                        >= 0.25
+                    ):
+                        self.last_print_time = now
+
+                        if stable_chord is not None:
+                            print(
+                                f"\r🎵 Chord: "
+                                f"{stable_chord:<8} "
+                                f"Confidence: "
+                                f"{stable_confidence:.0%}",
+                                end="",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                "\r🎤 Listening...        ",
+                                end="",
+                                flush=True,
+                            )
+
+        except KeyboardInterrupt:
+            print("\n\nStopping live chord detection...")
+
+        except Exception as error:
+            print(
+                f"\nLive detection error: {error}"
             )
 
-            sections.append({
-                "start_time": current_start,
-                "end_time": audio_duration,
-                "chord": current_chord,
-                "confidence": average_confidence,
-            })
+        finally:
+            self.stop_detection()
 
-        return sections
+    # ============================================================
+    # STOP DETECTION
+    # ============================================================
 
-    def _remove_short_sections(self, sections):
-        """
-        Remove very short chord changes.
+    def stop_detection(self):
+        """Stop live microphone detection."""
 
-        A short section is treated as noise and merged with
-        the previous or next chord when possible.
-        """
+        self.is_running = False
 
-        if len(sections) <= 1:
-            return sections
+        print("\n🎸 Live chord detection stopped.")
 
-        cleaned = []
+    # ============================================================
+    # GET CURRENT RESULT
+    # ============================================================
 
-        index = 0
-
-        while index < len(sections):
-
-            section = sections[index]
-
-            duration = (
-                section["end_time"]
-                - section["start_time"]
-            )
-
-            # Keep sections that are long enough
-            if duration >= self.min_chord_duration:
-
-                cleaned.append(section.copy())
-
-                index += 1
-                continue
-
-            # Short section: try to merge with previous
-            if cleaned:
-
-                cleaned[-1]["end_time"] = (
-                    section["end_time"]
-                )
-
-                cleaned[-1]["confidence"] = (
-                    cleaned[-1]["confidence"]
-                    + section["confidence"]
-                ) / 2
-
-                index += 1
-                continue
-
-            # If this is the first section, keep it
-            cleaned.append(section.copy())
-
-            index += 1
-
-        return cleaned
-
-    def _fix_section_boundaries(self, sections):
-        """
-        Ensure every section connects cleanly to the next section.
-        """
-
-        if not sections:
-            return []
-
-        for index in range(len(sections) - 1):
-
-            boundary = sections[index]["end_time"]
-
-            sections[index + 1]["start_time"] = boundary
-
-        return sections
-
-    def analyze_file(
+    def get_current_chord(
         self,
-        audio_path,
-        window_seconds=None,
-    ):
-        """
-        Analyze an audio file and return clean chord changes.
+    ) -> Tuple[Optional[str], float]:
+        """Return the current stable chord."""
 
-        Returns a list like:
-
-        [
-            {
-                "start_time": 0.0,
-                "end_time": 3.5,
-                "chord": "C",
-                "confidence": 0.82
-            },
-            ...
-        ]
-        """
-
-        if window_seconds is None:
-            window_seconds = self.window_seconds
-
-        print(f"\nAnalyzing chord changes from: {audio_path}")
-
-        # Load the audio file
-        y, sr = librosa.load(
-            audio_path,
-            sr=self.sample_rate,
-            mono=True,
+        return (
+            self.current_chord,
+            self.current_confidence,
         )
 
-        audio_duration = len(y) / sr
+    # ============================================================
+    # LIST AUDIO DEVICES
+    # ============================================================
 
-        window_samples = int(
-            window_seconds * sr
-        )
+    @staticmethod
+    def list_audio_devices():
+        """Print available microphone devices."""
 
-        hop_samples = int(
-            self.hop_seconds * sr
-        )
-
-        predictions = []
-
-        # ----------------------------------------------------------
-        # Analyze the song in overlapping windows
-        # ----------------------------------------------------------
-        for start_sample in range(
-            0,
-            len(y),
-            hop_samples,
-        ):
-
-            end_sample = (
-                start_sample + window_samples
-            )
-
-            audio_window = y[
-                start_sample:end_sample
-            ]
-
-            # Stop if the final chunk is too small
-            if len(audio_window) < sr * 0.5:
-                break
-
-            chroma_vector = self._get_window_chroma(
-                audio_window
-            )
-
-            chord, confidence = self._detect_chord(
-                chroma_vector
-            )
-
-            start_time = start_sample / sr
-
-            actual_end_sample = min(
-                end_sample,
-                len(y),
-            )
-
-            end_time = actual_end_sample / sr
-
-            center_time = (
-                start_time + end_time
-            ) / 2
-
-            predictions.append({
-                "start_time": start_time,
-                "end_time": end_time,
-                "center_time": center_time,
-                "chord": chord,
-                "confidence": confidence,
-            })
-
-        # ----------------------------------------------------------
-        # Smooth noisy chord predictions
-        # ----------------------------------------------------------
-        predictions = self._smooth_predictions(
-            predictions
-        )
-
-        # ----------------------------------------------------------
-        # Convert windows into non-overlapping sections
-        # ----------------------------------------------------------
-        sections = (
-            self._create_non_overlapping_sections(
-                predictions,
-                audio_duration,
-            )
-        )
-
-        # ----------------------------------------------------------
-        # Remove short noisy sections
-        # ----------------------------------------------------------
-        sections = self._remove_short_sections(
-            sections
-        )
-
-        # ----------------------------------------------------------
-        # Ensure clean boundaries
-        # ----------------------------------------------------------
-        sections = self._fix_section_boundaries(
-            sections
-        )
-
-        return sections
+        print(sd.query_devices())
