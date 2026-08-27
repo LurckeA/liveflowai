@@ -60,7 +60,7 @@ def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
 def show_audio_files(db):
     """Display all audio files stored in the database."""
     try:
-        files = db.FetchAll()
+        files = db.FetchAllDB()
         if not files:
             print("No audio files found in database.\n")
             return
