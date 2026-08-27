@@ -56,22 +56,33 @@ def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
         print(f"✗ Error analyzing {file_path.name}: {e}\n")
         return False
 
-
 def show_audio_files(db):
     """Display all audio files stored in the database."""
+
     try:
-        files = db.FetchAll()
+        files = db.FetchAllDB()
+
         if not files:
-            print("No audio files found in database.\n")
+            print("\nNo audio files found in database.\n")
             return
-        
+
         print("\n=== Stored Audio Files ===")
+
         for i, file in enumerate(files, 1):
-            print(f"{i}. {file['name']} - {file['tempo']:.2f} BPM - {file['duration']:.2f}s")
-            print(f"   Chords: {file['chords']}\n")
+            song = file[0]
+            duration = file[1]
+            bpm = file[2]
+            chords = file[3]
+
+            print(
+                f"{i}. {song} - "
+                f"{bpm:.2f} BPM - "
+                f"{duration:.2f}s"
+            )
+            print(f"   Chords: {chords}\n")
+
     except Exception as e:
         print(f"Error fetching files: {e}\n")
-
 
 def start_live_detection(chord_detector, db):
     """Start live chord detection from microphone."""
