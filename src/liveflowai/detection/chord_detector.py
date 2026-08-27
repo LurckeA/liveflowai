@@ -102,7 +102,7 @@ class LiveChordDetector:
 
     def __init__(
         self,
-        sample_rate: int = 22050,
+        sample_rate: int = 44100,
         block_size: int = 2048,
         analysis_duration: float = 1.0,
         silence_threshold: float = 0.01,
