@@ -123,3 +123,10 @@ class DatabaseLogic:
                 )
         else:
             print("Nothing in database.")
+
+    def FetchFiveFirstChords(self, chords):
+        try:
+            with self.ConnectDB() as conn:
+                c = conn.cursor()
+        except Exception as e:
+            print("Hi.")
