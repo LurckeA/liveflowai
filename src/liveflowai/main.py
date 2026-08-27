@@ -112,7 +112,6 @@ def analyze_audio_files(
 
     print("\nReturning to startup menu...")
 
-
 def show_audio_files(db):
     """Display all audio files stored in the database."""
 
@@ -131,17 +130,28 @@ def show_audio_files(db):
             bpm = file[2]
             chords = file[3]
 
+            # Fetch only the first five chords
+            first_five_chords = db.FetchFirstFiveChords(song)
+
             print(
                 f"{i}. {song} - "
                 f"{bpm:.2f} BPM - "
                 f"{duration:.2f}s"
             )
-
             print(f"   Chords: {chords}\n")
+
+            if first_five_chords:
+                print(
+                    f"   First five chords: "
+                    f"{', '.join(first_five_chords)}"
+                )
+            else:
+                print("   Chords: None")
+
+            print()
 
     except Exception as e:
         print(f"Error fetching files: {e}\n")
-
 
 def start_live_detection(chord_detector):
     """Start live chord detection from microphone."""
