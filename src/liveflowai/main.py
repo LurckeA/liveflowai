@@ -6,6 +6,7 @@ from pathlib import Path
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
+from liveflowai.audio.audio_file_selector import AudioFileSelector
 from liveflowai.database.database import DatabaseLogic
 
 def main():
@@ -18,6 +19,14 @@ def main():
     file_path = AUDIO_DIR / "Mary Had a Little Lamb.mp3"
     
     try:
+        # User Greeting
+        print("LIVEFLOWAI")
+        print("Select your option.")
+        print("1. Select Audio Files to analyze.") # Audio file selector works here along with chord analyzer and tempo analyzer with the selected audio file selector. After analyzing, push every results into database with DatabaseLogic
+        print("2. Show selected Audio Files.") # Fetch everything stored in database with DatabaseLogic
+        print("3. Start Playing.") # ChordDetector works with DatabaseLogic.
+        user = int(input(""))
+
         # Detect tempo
         result = analyzer.detect_tempo(file_path)
         print(f"Tempo: {result['tempo_bpm']:.2f} BPM")
@@ -29,7 +38,7 @@ def main():
         
         # Visualize
         analyzer.visualize_tempo(file_path)
-        
+
          # Detect chords  # NEW
         chords, timestamps = chord_detector.detect_from_file(file_path)  # NEW
         
@@ -48,6 +57,9 @@ def main():
             result['tempo_bpm'], 
             chords_string  
         )
+
+        # Fetch all in Database
+        
 
         # Detect chords live from microphone
         chord_detector.start_detection()
