@@ -123,3 +123,36 @@ class DatabaseLogic:
                 )
         else:
             print("Nothing in database.")
+
+    def FetchFirstFiveChords(self, song):
+        """Fetch the first five chords for a song."""
+
+        try:
+            with self.ConnectDB() as conn:
+                c = conn.cursor()
+
+                c.execute(
+                    "SELECT chords FROM liveflow WHERE song = ?",
+                    (song,)
+                )
+
+                row = c.fetchone()
+
+                if row is None:
+                    return []
+
+                chords = row[0]
+
+                if not chords:
+                    return []
+
+                chords = [
+                    chord.strip()
+                    for chord in chords.split(",")
+                ]
+
+                return chords[:5]
+
+        except Exception as e:
+            print(f"Error fetching five chords: {e}")
+            return []
