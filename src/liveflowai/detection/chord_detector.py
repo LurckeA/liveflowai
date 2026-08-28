@@ -737,27 +737,30 @@ class LiveChordDetector:
 
     def record_chord_sequence(
         self,
-        duration: float = 5.0,
+        duration: float = 15.0,
         segment_duration: float = 1.0,
         device=None,
-    ) -> List[str]:
+    ):
         """
         Record microphone audio for a fixed duration and detect
         one chord for each segment.
 
-        Default:
+        Unknown/uncertain segments are preserved as None instead
+        of invalidating the entire recording.
 
-            5 seconds
-                ↓
-            1 second segments
-                ↓
-            5 detected chords
+        Example for 15 seconds:
 
-        Returns:
-            A list containing the detected chords.
-
-        Example:
-            ["C", "F", "G", "Em", "F"]
+            [
+                "C",
+                None,
+                "F",
+                "G",
+                None,
+                "Em",
+                "F",
+                None,
+                ...
+            ]
         """
 
         if duration <= 0:
@@ -784,22 +787,19 @@ class LiveChordDetector:
         )
 
         print(
-            "Play the chords continuously."
+            "Play the chords during the recording."
         )
 
         print()
 
-        # --------------------------------------------------------
-        # Clear anything left over from previous attempts.
-        #
-        # This means every new attempt overwrites the previous
-        # recording in memory.
-        # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # Clear previous recording.
+        # ------------------------------------------------------------
 
         self.audio_buffer.clear()
         self.prediction_history.clear()
 
-        # Clear old microphone queue.
+        # Clear any old microphone data.
         while not self.audio_queue.empty():
             try:
                 self.audio_queue.get_nowait()
@@ -820,10 +820,7 @@ class LiveChordDetector:
                 device=device,
             ):
 
-                while (
-                    time.time() - start_time
-                    < duration
-                ):
+                while time.time() - start_time < duration:
 
                     try:
                         audio_block = (
@@ -843,11 +840,6 @@ class LiveChordDetector:
                         time.time() - start_time
                     )
 
-                    remaining = max(
-                        0.0,
-                        duration - elapsed
-                    )
-
                     print(
                         f"\rRecording: "
                         f"{elapsed:.1f}/{duration:.1f}s",
@@ -856,6 +848,7 @@ class LiveChordDetector:
                     )
 
         except KeyboardInterrupt:
+
             print(
                 "\n\nRecording cancelled."
             )
@@ -863,6 +856,7 @@ class LiveChordDetector:
             return []
 
         except Exception as error:
+
             print(
                 f"\nRecording error: {error}"
             )
@@ -871,16 +865,21 @@ class LiveChordDetector:
 
         print("\n")
 
-        # --------------------------------------------------------
-        # Combine all recorded microphone blocks.
-        # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # Make sure we actually recorded something.
+        # ------------------------------------------------------------
 
         if not recorded_audio:
+
             print(
                 "No microphone audio was recorded."
             )
 
             return []
+
+        # ------------------------------------------------------------
+        # Combine all microphone blocks.
+        # ------------------------------------------------------------
 
         audio = np.concatenate(
             recorded_audio
@@ -890,18 +889,16 @@ class LiveChordDetector:
             self.sample_rate * duration
         )
 
-        # Trim to exactly the requested duration.
         audio = audio[:expected_samples]
 
-        # --------------------------------------------------------
-        # Split recording into segments.
-        # --------------------------------------------------------
+        # ------------------------------------------------------------
+        # Split into segments.
+        # ------------------------------------------------------------
 
         detected_chords = []
 
         segment_samples = int(
-            self.sample_rate
-            * segment_duration
+            self.sample_rate * segment_duration
         )
 
         for index in range(
@@ -921,69 +918,54 @@ class LiveChordDetector:
             if len(segment) < segment_samples:
                 break
 
-            # --------------------------------------------
-            # Extract chroma from this one-second section.
-            # --------------------------------------------
+            # --------------------------------------------------------
+            # Extract chroma.
+            # --------------------------------------------------------
 
             chroma = self._extract_chroma(
                 segment
             )
 
-            # --------------------------------------------
-            # Detect chord directly.
-            #
-            # We intentionally don't use _smooth_prediction()
-            # here because we want exactly one chord per
-            # recording segment.
-            # --------------------------------------------
+            # --------------------------------------------------------
+            # Detect chord.
+            # --------------------------------------------------------
 
             chord, confidence = (
                 self._detect_chord(chroma)
             )
 
             if chord is None:
+
+                detected_chords.append(None)
+
                 print(
-                    f"  {index + 1}. "
+                    f"  {index + 1:02d}. "
                     f"Unknown "
                     f"(confidence: "
                     f"{confidence:.0%})"
                 )
 
-                # Unknown means this recording cannot
-                # reliably match a song.
-                detected_chords.append(None)
-
             else:
-                print(
-                    f"  {index + 1}. "
-                    f"{chord:<8} "
-                    f"(confidence: "
-                    f"{confidence:.0%})"
-                )
 
                 detected_chords.append(
                     chord
                 )
 
-        # --------------------------------------------------------
-        # Validate result.
-        # --------------------------------------------------------
+                print(
+                    f"  {index + 1:02d}. "
+                    f"{chord:<8} "
+                    f"(confidence: "
+                    f"{confidence:.0%})"
+                )
 
-        if len(detected_chords) != number_of_segments:
+        # ------------------------------------------------------------
+        # Make sure we have the expected number of segments.
+        # ------------------------------------------------------------
+
+        if len(detected_chords) == 0:
+
             print(
-                "\nCould not obtain five complete "
-                "chord segments."
-            )
-
-            return []
-
-        if any(
-            chord is None
-            for chord in detected_chords
-        ):
-            print(
-                "\n⚠ Could not confidently detect "
-                "all five chords."
+                "\n⚠ No chord segments detected."
             )
 
             return []
