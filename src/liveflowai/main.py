@@ -7,6 +7,7 @@ from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
 from liveflowai.audio.audio_file_selector import AudioFileSelector
+from liveflowai.output.iem_manager import IEMManager
 from liveflowai.database.database import DatabaseLogic
 
 
@@ -34,7 +35,16 @@ def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
                 f"{chord} "
                 f"(confidence: {chord.confidence:.2%})"
             )
-        
+        # Initialize IEM Manager
+        iem_manager = IEMManager()
+
+        # Announce the next song information
+        iem_manager.announce_next_song(
+            title=file_path.stem,
+            duration_seconds=tempo_result["duration"],
+            bpm=tempo_result["tempo_bpm"],
+            chords=chords,
+        )
         # Convert chords for database storage
         chords_string = ", ".join(str(chord) for chord in chords)
         
