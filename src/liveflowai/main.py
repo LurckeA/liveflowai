@@ -5,34 +5,71 @@ from pathlib import Path
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
+from liveflowai.detection.song_predictor import SongPredictor
 from liveflowai.audio.audio_file_selector import AudioFileSelector
 from liveflowai.output.iem_manager import IEMManager
 from liveflowai.database.database import DatabaseLogic
 
 
-def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
+def analyze_audio_file(
+    file_path,
+    analyzer,
+    chord_analyzer,
+    db,
+):
     """Analyze a single audio file and store results in database."""
 
     try:
-        print(f"\n=== Analyzing: {file_path.name} ===")
+        print(
+            f"\n=== Analyzing: "
+            f"{file_path.name} ==="
+        )
 
+        # ---------------------------------------------------------
         # Detect tempo
-        tempo_result = analyzer.detect_tempo(file_path)
+        # ---------------------------------------------------------
 
-        print(f"Tempo: {tempo_result['tempo_bpm']:.2f} BPM")
-        print(f"Duration: {tempo_result['duration']:.2f} seconds")
-        print(f"Number of beats: {tempo_result['num_beats']}")
+        tempo_result = analyzer.detect_tempo(
+            file_path
+        )
 
+        print(
+            f"Tempo: "
+            f"{tempo_result['tempo_bpm']:.2f} BPM"
+        )
+
+        print(
+            f"Duration: "
+            f"{tempo_result['duration']:.2f} seconds"
+        )
+
+        print(
+            f"Number of beats: "
+            f"{tempo_result['num_beats']}"
+        )
+
+        # ---------------------------------------------------------
         # Get confidence metrics
-        confidence = analyzer.get_beat_confidence(file_path)
+        # ---------------------------------------------------------
+
+        confidence = (
+            analyzer.get_beat_confidence(
+                file_path
+            )
+        )
 
         print(
             f"Confidence score: "
             f"{confidence['confidence_score']:.2f}"
         )
 
+        # ---------------------------------------------------------
         # Detect chords
-        chords = chord_analyzer.analyze_chords(file_path)
+        # ---------------------------------------------------------
+
+        chords = chord_analyzer.analyze_chords(
+            file_path
+        )
 
         print("\nDetected Chords:")
 
@@ -41,27 +78,47 @@ def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
                 f"{chord.timestamp:.2f}s - "
                 f"{chord.timestamp + chord.duration:.2f}s: "
                 f"{chord} "
-                f"(confidence: {chord.confidence:.2%})"
+                f"(confidence: "
+                f"{chord.confidence:.2%})"
             )
+
+        # ---------------------------------------------------------
         # Initialize IEM Manager
+        # ---------------------------------------------------------
+
         iem_manager = IEMManager()
 
         # Announce the next song information
         iem_manager.announce_next_song(
             title=file_path.stem,
-            duration_seconds=tempo_result["duration"],
+            duration_seconds=(
+                tempo_result["duration"]
+            ),
             bpm=tempo_result["tempo_bpm"],
             chords=chords,
         )
 
+        # ---------------------------------------------------------
+        # Convert chords to database string
+        # ---------------------------------------------------------
 
-        # Convert chords to a database-friendly string
-        chords_string = ", ".join(str(chord) for chord in chords)
+        chords_string = ", ".join(
+            str(chord)
+            for chord in chords
+        )
 
+        # ---------------------------------------------------------
         # Visualize tempo
-        analyzer.visualize_tempo(file_path)
+        # ---------------------------------------------------------
 
+        analyzer.visualize_tempo(
+            file_path
+        )
+
+        # ---------------------------------------------------------
         # Store results in database
+        # ---------------------------------------------------------
+
         db.PushDB(
             file_path.name,
             tempo_result["duration"],
@@ -77,6 +134,7 @@ def analyze_audio_file(file_path, analyzer, chord_analyzer, db):
         return True
 
     except Exception as e:
+
         print(
             f"\n✗ Error analyzing "
             f"{file_path.name}: {e}"
@@ -101,20 +159,30 @@ def analyze_audio_files(
         4. Return to the startup menu.
     """
 
-    print("\n=== ANALYZE AUDIO FILES ===")
+    print(
+        "\n=== ANALYZE AUDIO FILES ==="
+    )
 
-    selected_files = audio_selector.select_multiple()
+    selected_files = (
+        audio_selector.select_multiple()
+    )
 
     if not selected_files:
-        print("\nNo audio files selected.")
+
+        print(
+            "\nNo audio files selected."
+        )
+
         return
 
     print(
-        f"\nSelected {len(selected_files)} "
+        f"\nSelected "
+        f"{len(selected_files)} "
         f"audio file(s) for analysis."
     )
 
     for file_path in selected_files:
+
         analyze_audio_file(
             file_path,
             analyzer,
@@ -122,7 +190,10 @@ def analyze_audio_files(
             db,
         )
 
-    print("\nReturning to startup menu...")
+    print(
+        "\nReturning to startup menu..."
+    )
+
 
 def show_audio_files(db):
     """Display all audio files stored in the database."""
@@ -131,57 +202,125 @@ def show_audio_files(db):
         files = db.FetchAllDB()
 
         if not files:
-            print("\nNo audio files found in database.\n")
+
+            print(
+                "\nNo audio files found "
+                "in database.\n"
+            )
+
             return
 
-        print("\n=== Stored Audio Files ===")
+        print(
+            "\n=== Stored Audio Files ==="
+        )
 
-        for i, file in enumerate(files, 1):
+        for i, file in enumerate(
+            files,
+            1,
+        ):
+
             song = file[0]
             duration = file[1]
             bpm = file[2]
-            chords = file[3]
 
-            # Fetch only the first five chords
-            first_five_chords = db.FetchFirstFiveChords(song)
+            # -------------------------------------------------
+            # Fetch only the first five chords.
+            # -------------------------------------------------
+
+            first_five_chords = (
+                db.FetchFirstFiveChords(
+                    song
+                )
+            )
 
             print(
                 f"{i}. {song} - "
                 f"{bpm:.2f} BPM - "
                 f"{duration:.2f}s"
             )
-            print(f"   Chords: {chords}\n")
 
             if first_five_chords:
+
                 print(
                     f"   First five chords: "
                     f"{', '.join(first_five_chords)}"
                 )
+
             else:
-                print("   Chords: None")
+
+                print(
+                    "   First five chords: None"
+                )
 
             print()
 
     except Exception as e:
-        print(f"Error fetching files: {e}\n")
 
-def start_live_detection(chord_detector):
+        print(
+            f"Error fetching files: {e}\n"
+        )
+
+
+def start_live_detection(
+    chord_detector,
+):
     """Start live chord detection from microphone."""
 
     try:
-        print("\n=== Starting Live Chord Detection ===")
-        print("Press Ctrl+C to stop...\n")
+
+        print(
+            "\n=== Starting Live "
+            "Chord Detection ==="
+        )
+
+        print(
+            "Press Ctrl+C to stop...\n"
+        )
 
         chord_detector.start_detection()
 
     except KeyboardInterrupt:
-        print("\nLive detection stopped.")
+
+        print(
+            "\nLive detection stopped."
+        )
 
     except Exception as e:
-        print(f"Error in live detection: {e}")
+
+        print(
+            f"Error in live detection: {e}"
+        )
+
+
+def start_song_prediction(
+    song_predictor,
+):
+    """Start the five-chord song predictor."""
+
+    try:
+
+        print(
+            "\n=== Starting "
+            "Song Predictor ==="
+        )
+
+        song_predictor.predict_until_match()
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nSong prediction stopped."
+        )
+
+    except Exception as e:
+
+        print(
+            f"Error in song predictor: {e}"
+        )
 
 
 def main():
+
     # ---------------------------------------------------------
     # Initialize analyzers
     # ---------------------------------------------------------
@@ -204,7 +343,9 @@ def main():
     # Setup audio selector
     # ---------------------------------------------------------
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    PROJECT_ROOT = (
+        Path(__file__).resolve().parents[2]
+    )
 
     audio_selector = AudioFileSelector(
         base_dir=PROJECT_ROOT
@@ -216,29 +357,63 @@ def main():
 
     db = DatabaseLogic()
 
-    db.ConnectDB()
     db.MakeDB()
+
+    # ---------------------------------------------------------
+    # Initialize song predictor
+    #
+    # It uses the SAME LiveChordDetector instance.
+    # ---------------------------------------------------------
+
+    song_predictor = SongPredictor(
+        chord_detector=chord_detector,
+        db=db,
+        recording_duration=5.0,
+        segment_duration=1.0,
+    )
 
     # ---------------------------------------------------------
     # Startup menu
     # ---------------------------------------------------------
 
-    print("\n=== LIVEFLOWAI ===")
+    print(
+        "\n=== LIVEFLOWAI ==="
+    )
 
     while True:
+
         try:
-            print("\nSelect your option:")
-            print("1. Analyze Audio Files")
-            print("2. Show Analyzed Audio Files")
-            print("3. Start Live Chord Detection")
-            print("4. Exit")
+
+            print(
+                "\nSelect your option:"
+            )
+
+            print(
+                "1. Analyze Audio Files"
+            )
+
+            print(
+                "2. Show Analyzed Audio Files"
+            )
+
+            print(
+                "3. Start Live Chord Detection"
+            )
+
+            print(
+                "4. Predict Song"
+            )
+
+            print(
+                "5. Exit"
+            )
 
             user_input = input(
-                "Enter your choice (1-4): "
+                "Enter your choice (1-5): "
             ).strip()
 
             # -------------------------------------------------
-            # Option 1: Analyze Audio Files
+            # Option 1
             # -------------------------------------------------
 
             if user_input == "1":
@@ -251,15 +426,17 @@ def main():
                 )
 
             # -------------------------------------------------
-            # Option 2: Show Analyzed Audio Files
+            # Option 2
             # -------------------------------------------------
 
             elif user_input == "2":
 
-                show_audio_files(db)
+                show_audio_files(
+                    db
+                )
 
             # -------------------------------------------------
-            # Option 3: Live Chord Detection
+            # Option 3
             # -------------------------------------------------
 
             elif user_input == "3":
@@ -269,13 +446,24 @@ def main():
                 )
 
             # -------------------------------------------------
-            # Option 4: Exit
+            # Option 4
             # -------------------------------------------------
 
             elif user_input == "4":
 
+                start_song_prediction(
+                    song_predictor
+                )
+
+            # -------------------------------------------------
+            # Option 5
+            # -------------------------------------------------
+
+            elif user_input == "5":
+
                 print(
-                    "\nThank you for using LIVEFLOWAI!"
+                    "\nThank you for using "
+                    "LIVEFLOWAI!"
                 )
 
                 break
@@ -284,13 +472,14 @@ def main():
 
                 print(
                     "Invalid choice. "
-                    "Please enter 1, 2, 3, or 4."
+                    "Please enter 1, 2, 3, 4, or 5."
                 )
 
         except KeyboardInterrupt:
 
             print(
-                "\n\nProgram interrupted. Exiting..."
+                "\n\nProgram interrupted. "
+                "Exiting..."
             )
 
             break

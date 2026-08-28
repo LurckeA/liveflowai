@@ -20,7 +20,6 @@ class DatabaseLogic:
     def ConnectDB(self):
         """Create/open the SQLite database."""
 
-        # Make sure data/ exists.
         self.db_path.parent.mkdir(
             parents=True,
             exist_ok=True
@@ -49,7 +48,10 @@ class DatabaseLogic:
 
                 conn.commit()
 
-            print("Database table 'liveflow' created/verified successfully.")
+            print(
+                "Database table 'liveflow' "
+                "created/verified successfully."
+            )
 
         except Exception as e:
             print(f"Failure in making DB: {e}")
@@ -108,31 +110,24 @@ class DatabaseLogic:
             print(f"Error fetching from DB: {e}")
             return []
 
-    def DisplayResults(self, results):
-        """Display database query results."""
-
-        if results:
-            print(f"Found {len(results)} result(s):")
-
-            for row in results:
-                print(
-                    f"  Song: {row[0]}, "
-                    f"Duration: {row[1]:.2f}s, "
-                    f"BPM: {row[2]:.2f}, "
-                    f"Chords: {row[3]}"
-                )
-        else:
-            print("Nothing in database.")
-
     def FetchFirstFiveChords(self, song):
-        """Fetch the first five chords for a song."""
+        """
+        Fetch the first five chords for one song.
+
+        Returns:
+            list[str]
+        """
 
         try:
             with self.ConnectDB() as conn:
                 c = conn.cursor()
 
                 c.execute(
-                    "SELECT chords FROM liveflow WHERE song = ?",
+                    """
+                    SELECT chords
+                    FROM liveflow
+                    WHERE song = ?
+                    """,
                     (song,)
                 )
 
@@ -154,5 +149,84 @@ class DatabaseLogic:
                 return chords[:5]
 
         except Exception as e:
-            print(f"Error fetching five chords: {e}")
+            print(
+                f"Error fetching first five chords "
+                f"for {song}: {e}"
+            )
+
             return []
+
+    def FetchAllFirstFiveChords(self):
+        """
+        Fetch the first five chords of every stored song.
+
+        Returns:
+            list of tuples:
+
+            [
+                ("Song A.mp3", ["C", "F", "G", "Am", "F"]),
+                ("Song B.mp3", ["D", "A", "Bm", "G", "D"]),
+            ]
+        """
+
+        try:
+            with self.ConnectDB() as conn:
+                c = conn.cursor()
+
+                c.execute("""
+                    SELECT song, chords
+                    FROM liveflow
+                    ORDER BY song
+                """)
+
+                rows = c.fetchall()
+
+            results = []
+
+            for song, chords_string in rows:
+
+                if not chords_string:
+                    continue
+
+                chords = [
+                    chord.strip()
+                    for chord in chords_string.split(",")
+                ]
+
+                first_five = chords[:5]
+
+                # Only songs with at least five chords
+                # can participate in prediction.
+                if len(first_five) == 5:
+                    results.append(
+                        (song, first_five)
+                    )
+
+            return results
+
+        except Exception as e:
+            print(
+                f"Error fetching first five chords "
+                f"from database: {e}"
+            )
+
+            return []
+
+    def DisplayResults(self, results):
+        """Display database query results."""
+
+        if results:
+            print(
+                f"Found {len(results)} result(s):"
+            )
+
+            for row in results:
+                print(
+                    f"  Song: {row[0]}, "
+                    f"Duration: {row[1]:.2f}s, "
+                    f"BPM: {row[2]:.2f}, "
+                    f"Chords: {row[3]}"
+                )
+
+        else:
+            print("Nothing in database.")
