@@ -1,7 +1,9 @@
+# src/liveflowai/detection/chord_predictor.py
+
 import queue
 import time
 from collections import Counter, deque
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import librosa
 import numpy as np
@@ -728,6 +730,265 @@ class LiveChordDetector:
             self.current_chord,
             self.current_confidence,
         )
+    
+    # ============================================================
+    # RECORD FIVE-SECOND CHORD SEQUENCE
+    # ============================================================
+
+    def record_chord_sequence(
+        self,
+        duration: float = 5.0,
+        segment_duration: float = 1.0,
+        device=None,
+    ) -> List[str]:
+        """
+        Record microphone audio for a fixed duration and detect
+        one chord for each segment.
+
+        Default:
+
+            5 seconds
+                ↓
+            1 second segments
+                ↓
+            5 detected chords
+
+        Returns:
+            A list containing the detected chords.
+
+        Example:
+            ["C", "F", "G", "Em", "F"]
+        """
+
+        if duration <= 0:
+            raise ValueError(
+                "Recording duration must be greater than 0."
+            )
+
+        if segment_duration <= 0:
+            raise ValueError(
+                "Segment duration must be greater than 0."
+            )
+
+        number_of_segments = int(
+            duration / segment_duration
+        )
+
+        if number_of_segments <= 0:
+            raise ValueError(
+                "Duration must be at least one segment."
+            )
+
+        print(
+            f"\n🎤 Recording {duration:.0f} seconds..."
+        )
+
+        print(
+            "Play the chords continuously."
+        )
+
+        print()
+
+        # --------------------------------------------------------
+        # Clear anything left over from previous attempts.
+        #
+        # This means every new attempt overwrites the previous
+        # recording in memory.
+        # --------------------------------------------------------
+
+        self.audio_buffer.clear()
+        self.prediction_history.clear()
+
+        # Clear old microphone queue.
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        recorded_audio = []
+
+        start_time = time.time()
+
+        try:
+            with sd.InputStream(
+                samplerate=self.sample_rate,
+                blocksize=self.block_size,
+                channels=1,
+                dtype="float32",
+                callback=self._audio_callback,
+                device=device,
+            ):
+
+                while (
+                    time.time() - start_time
+                    < duration
+                ):
+
+                    try:
+                        audio_block = (
+                            self.audio_queue.get(
+                                timeout=0.1
+                            )
+                        )
+
+                    except queue.Empty:
+                        continue
+
+                    recorded_audio.append(
+                        audio_block.copy()
+                    )
+
+                    elapsed = (
+                        time.time() - start_time
+                    )
+
+                    remaining = max(
+                        0.0,
+                        duration - elapsed
+                    )
+
+                    print(
+                        f"\rRecording: "
+                        f"{elapsed:.1f}/{duration:.1f}s",
+                        end="",
+                        flush=True,
+                    )
+
+        except KeyboardInterrupt:
+            print(
+                "\n\nRecording cancelled."
+            )
+
+            return []
+
+        except Exception as error:
+            print(
+                f"\nRecording error: {error}"
+            )
+
+            return []
+
+        print("\n")
+
+        # --------------------------------------------------------
+        # Combine all recorded microphone blocks.
+        # --------------------------------------------------------
+
+        if not recorded_audio:
+            print(
+                "No microphone audio was recorded."
+            )
+
+            return []
+
+        audio = np.concatenate(
+            recorded_audio
+        )
+
+        expected_samples = int(
+            self.sample_rate * duration
+        )
+
+        # Trim to exactly the requested duration.
+        audio = audio[:expected_samples]
+
+        # --------------------------------------------------------
+        # Split recording into segments.
+        # --------------------------------------------------------
+
+        detected_chords = []
+
+        segment_samples = int(
+            self.sample_rate
+            * segment_duration
+        )
+
+        for index in range(
+            number_of_segments
+        ):
+
+            start = (
+                index * segment_samples
+            )
+
+            end = (
+                start + segment_samples
+            )
+
+            segment = audio[start:end]
+
+            if len(segment) < segment_samples:
+                break
+
+            # --------------------------------------------
+            # Extract chroma from this one-second section.
+            # --------------------------------------------
+
+            chroma = self._extract_chroma(
+                segment
+            )
+
+            # --------------------------------------------
+            # Detect chord directly.
+            #
+            # We intentionally don't use _smooth_prediction()
+            # here because we want exactly one chord per
+            # recording segment.
+            # --------------------------------------------
+
+            chord, confidence = (
+                self._detect_chord(chroma)
+            )
+
+            if chord is None:
+                print(
+                    f"  {index + 1}. "
+                    f"Unknown "
+                    f"(confidence: "
+                    f"{confidence:.0%})"
+                )
+
+                # Unknown means this recording cannot
+                # reliably match a song.
+                detected_chords.append(None)
+
+            else:
+                print(
+                    f"  {index + 1}. "
+                    f"{chord:<8} "
+                    f"(confidence: "
+                    f"{confidence:.0%})"
+                )
+
+                detected_chords.append(
+                    chord
+                )
+
+        # --------------------------------------------------------
+        # Validate result.
+        # --------------------------------------------------------
+
+        if len(detected_chords) != number_of_segments:
+            print(
+                "\nCould not obtain five complete "
+                "chord segments."
+            )
+
+            return []
+
+        if any(
+            chord is None
+            for chord in detected_chords
+        ):
+            print(
+                "\n⚠ Could not confidently detect "
+                "all five chords."
+            )
+
+            return []
+
+        return detected_chords
 
     # ============================================================
     # START LIVE DETECTION
