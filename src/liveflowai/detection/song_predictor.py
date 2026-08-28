@@ -14,7 +14,7 @@ class SongPredictor:
         self,
         chord_detector,
         db,
-        recording_duration: float = 5.0,
+        recording_duration: float = 15.0,
         segment_duration: float = 1.0,
     ):
         self.chord_detector = chord_detector
@@ -140,7 +140,7 @@ class SongPredictor:
 
     def predict_once(self) -> Optional[str]:
         """
-        Record five seconds and attempt to identify a song.
+        Record fifteen seconds and attempt to identify a song.
 
         Returns:
             Song name if matched.
@@ -211,9 +211,9 @@ class SongPredictor:
 
     def predict_until_match(self) -> Optional[str]:
         """
-        Continuously record five seconds and search for a song.
+        Continuously record fifteen seconds and search for a song.
 
-        Every failed attempt is replaced by a new five-second
+        Every failed attempt is replaced by a new fifteen-second
         recording.
 
         Stops when:
@@ -238,7 +238,7 @@ class SongPredictor:
         )
 
         print(
-            "The system will record five seconds "
+            "The system will record fifteen seconds "
             "at a time."
         )
 
@@ -300,7 +300,7 @@ class SongPredictor:
                 )
 
                 print(
-                    "Recording another five seconds..."
+                    "Recording another fifteen seconds..."
                 )
 
         except KeyboardInterrupt:

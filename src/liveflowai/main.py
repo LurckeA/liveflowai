@@ -368,7 +368,7 @@ def main():
     song_predictor = SongPredictor(
         chord_detector=chord_detector,
         db=db,
-        recording_duration=5.0,
+        recording_duration=15.0,
         segment_duration=1.0,
     )
 
