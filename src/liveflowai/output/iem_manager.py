@@ -1,295 +1,96 @@
 # src/liveflowai/output/iem_manager.py
 
-from dataclasses import dataclass
 from typing import Iterable, Optional
-
-import pyttsx3
-
-
-@dataclass
-class SongInfo:
-    """
-    Information that will be announced to the user.
-    """
-
-    title: str
-    duration_seconds: float
-    bpm: float
-    chords: list[str]
 
 
 class IEMManager:
     """
-    Handles voice announcements for LiveFlowAI.
+    Announce upcoming song information to the performer, typically
+    routed to an in-ear monitor (IEM) mix.
 
-    The manager announces:
-        - Next song
-        - Song duration
-        - BPM
-        - Chord progression
-
-    This class does not analyze the audio itself.
-
-    Analysis should be done by:
-        - TempoAnalyzer
-        - ChordAnalyzer
-
-    Then the results are passed into this manager.
+    Prints a formatted announcement to the console and, if a
+    text-to-speech engine is available, speaks it aloud as well.
     """
 
     def __init__(
         self,
-        rate: int = 160,
+        enable_speech: bool = True,
+        rate: int = 175,
         volume: float = 1.0,
-        voice_id: Optional[int] = None,
     ):
-        self.engine = pyttsx3.init()
+        self.enable_speech = enable_speech
+        self.engine = None
 
-        self.engine.setProperty("rate", rate)
-        self.engine.setProperty(
-            "volume",
-            max(0.0, min(1.0, volume)),
-        )
-
-        if voice_id is not None:
-            voices = self.engine.getProperty("voices")
-
-            if 0 <= voice_id < len(voices):
-                self.engine.setProperty(
-                    "voice",
-                    voices[voice_id].id,
-                )
-
-        self.current_song: Optional[SongInfo] = None
+        if self.enable_speech:
+            self.engine = self._init_engine(rate, volume)
 
     # ============================================================
-    # SPEAK TEXT
-    # ============================================================
-
-    def speak(
-        self,
-        text: str,
-        wait: bool = True,
-    ):
-        """
-        Speak text using pyttsx3.
-
-        Parameters
-        ----------
-        text:
-            Text to announce.
-
-        wait:
-            If True, wait until speech finishes.
-        """
-
-        if not text:
-            return
-
-        self.engine.say(text)
-
-        if wait:
-            self.engine.runAndWait()
-
-    # ============================================================
-    # FORMAT SONG DURATION
+    # ENGINE SETUP
     # ============================================================
 
     @staticmethod
-    def format_duration(
-        duration_seconds: float,
-    ) -> str:
+    def _init_engine(rate: int, volume: float):
         """
-        Convert seconds into a natural speech format.
+        Try to initialize the pyttsx3 TTS engine.
 
-        Examples:
-            45       -> "45 seconds"
-            60       -> "1 minute"
-            75       -> "1 minute and 15 seconds"
-            125.5    -> "2 minutes and 5 seconds"
+        Returns None (and disables speech) if it fails, e.g. because
+        no audio output device is available.
         """
 
-        duration_seconds = max(
-            0,
-            float(duration_seconds),
-        )
+        try:
+            import pyttsx3
 
-        minutes = int(duration_seconds // 60)
+            engine = pyttsx3.init()
+            engine.setProperty("rate", rate)
+            engine.setProperty("volume", volume)
 
-        seconds = int(
-            round(duration_seconds % 60)
-        )
+            return engine
 
-        if seconds == 60:
-            minutes += 1
-            seconds = 0
-
-        if minutes == 0:
-            return f"{seconds} seconds"
-
-        if minutes == 1:
-            if seconds == 0:
-                return "1 minute"
-
-            return (
-                f"1 minute and "
-                f"{seconds} seconds"
+        except Exception as e:
+            print(
+                f"[IEMManager] Speech engine unavailable, "
+                f"falling back to text-only announcements: {e}"
             )
 
-        if seconds == 0:
-            return f"{minutes} minutes"
-
-        return (
-            f"{minutes} minutes and "
-            f"{seconds} seconds"
-        )
+            return None
 
     # ============================================================
-    # CLEAN CHORDS
+    # FORMATTING HELPERS
     # ============================================================
 
     @staticmethod
-    def clean_chords(
-        chords: Iterable,
-    ) -> list[str]:
-        """
-        Convert chord objects or strings into a clean chord list.
+    def _format_duration(duration_seconds: float) -> str:
+        """Format seconds as M:SS, e.g. 187.4 -> '3:07'."""
 
-        Consecutive duplicate chords are removed.
+        total_seconds = int(round(duration_seconds))
+        minutes, seconds = divmod(total_seconds, 60)
 
-        Example:
-            C, C, C, G, G, Am
-
-        Becomes:
-            C, G, Am
-        """
-
-        clean = []
-
-        for chord in chords:
-
-            chord_name = str(chord).strip()
-
-            if not chord_name:
-                continue
-
-            # Remove consecutive duplicates.
-            if (
-                not clean
-                or clean[-1] != chord_name
-            ):
-                clean.append(chord_name)
-
-        return clean
-
-    # ============================================================
-    # FORMAT CHORDS FOR SPEECH
-    # ============================================================
+        return f"{minutes}:{seconds:02d}"
 
     @staticmethod
-    def format_chords(
-        chords: list[str],
-        max_chords: int = 16,
-    ) -> str:
+    def _describe_chords(
+        chords: Optional[Iterable],
+        limit: int = 5,
+    ) -> Optional[str]:
         """
-        Create a natural chord progression announcement.
+        Build a short, spoken-friendly summary of the opening chords.
 
-        The first max_chords are announced to avoid an extremely
-        long voice announcement.
+        Accepts chord objects (via str()) or plain strings. Returns
+        None if there are no chords to describe.
         """
 
         if not chords:
-            return (
-                "No chord progression was detected"
-            )
+            return None
 
-        selected_chords = chords[:max_chords]
+        chord_names = [str(chord) for chord in chords][:limit]
 
-        progression = ", then ".join(
-            selected_chords
-        )
+        if not chord_names:
+            return None
 
-        if len(chords) > max_chords:
-            progression += (
-                ", and more chords later in the song"
-            )
-
-        return progression
+        return ", ".join(chord_names)
 
     # ============================================================
-    # CREATE SONG INFO
-    # ============================================================
-
-    def create_song_info(
-        self,
-        title: str,
-        duration_seconds: float,
-        bpm: float,
-        chords: Iterable,
-    ) -> SongInfo:
-        """
-        Create a SongInfo object from analysis results.
-        """
-
-        clean_chord_list = self.clean_chords(
-            chords
-        )
-
-        return SongInfo(
-            title=title,
-            duration_seconds=float(
-                duration_seconds
-            ),
-            bpm=float(bpm),
-            chords=clean_chord_list,
-        )
-
-    # ============================================================
-    # BUILD ANNOUNCEMENT
-    # ============================================================
-
-    def build_announcement(
-        self,
-        song_info: SongInfo,
-        max_chords: int = 16,
-    ) -> str:
-        """
-        Build the complete announcement.
-
-        Example:
-
-        "Next song is Mary Had a Little Lamb.
-        Duration is 1 minute and 23 seconds.
-        Tempo is 120 beats per minute.
-        The chord progression is C, then G, then A minor."
-        """
-
-        duration_text = self.format_duration(
-            song_info.duration_seconds
-        )
-
-        bpm_text = (
-            f"{round(song_info.bpm)} "
-            f"beats per minute"
-        )
-
-        chords_text = self.format_chords(
-            song_info.chords,
-            max_chords=max_chords,
-        )
-
-        announcement = (
-            f"Next song is {song_info.title}. "
-            f"The duration is {duration_text}. "
-            f"The tempo is {bpm_text}. "
-            f"The chord progression is "
-            f"{chords_text}."
-        )
-
-        return announcement
-
-    # ============================================================
-    # ANNOUNCE NEXT SONG
+    # ANNOUNCEMENT
     # ============================================================
 
     def announce_next_song(
@@ -297,119 +98,82 @@ class IEMManager:
         title: str,
         duration_seconds: float,
         bpm: float,
-        chords: Iterable,
-        max_chords: int = 16,
-    ) -> SongInfo:
+        chords: Optional[Iterable] = None,
+        speak: bool = True,
+    ) -> str:
         """
-        Announce the next song and its analysis information.
+        Announce the next song's title, duration, and BPM.
 
-        Parameters
-        ----------
-        title:
-            Name of the next song.
+        Args:
+            title: Song title (e.g. file stem).
+            duration_seconds: Song duration in seconds.
+            bpm: Tempo in beats per minute.
+            chords: Optional iterable of detected chords; only the
+                opening few are mentioned.
+            speak: Whether to speak the announcement aloud, in
+                addition to printing it. Ignored if speech is
+                disabled or unavailable.
 
-        duration_seconds:
-            Song duration in seconds.
-
-        bpm:
-            Song tempo.
-
-        chords:
-            List of Chord objects or chord strings.
-
-        max_chords:
-            Maximum number of chord changes to announce.
-
-        Returns
-        -------
-        SongInfo
+        Returns:
+            The announcement text that was printed/spoken.
         """
 
-        song_info = self.create_song_info(
-            title=title,
-            duration_seconds=duration_seconds,
-            bpm=bpm,
-            chords=chords,
+        duration_display = self._format_duration(duration_seconds)
+        duration_minutes = duration_seconds / 60
+
+        message_lines = [
+            "\n=== NEXT SONG ===",
+            f"Title:    {title}",
+            f"Duration: {duration_display} "
+            f"({duration_minutes:.1f} min)",
+            f"Tempo:    {bpm:.0f} BPM",
+        ]
+
+        chord_summary = self._describe_chords(chords)
+
+        if chord_summary:
+            message_lines.append(f"Opening chords: {chord_summary}")
+
+        message_lines.append("=================\n")
+
+        printed_message = "\n".join(message_lines)
+        print(printed_message)
+
+        spoken_message = (
+            f"Next up: {title}. "
+            f"Duration {duration_display}, at {bpm:.0f} beats per minute."
         )
 
-        self.current_song = song_info
+        if speak and self.enable_speech and self.engine is not None:
+            self._speak(spoken_message)
 
-        announcement = self.build_announcement(
-            song_info,
-            max_chords=max_chords,
-        )
-
-        print("\n" + "=" * 60)
-        print("IEM ANNOUNCEMENT")
-        print("=" * 60)
-        print(announcement)
-        print("=" * 60 + "\n")
-
-        self.speak(
-            announcement,
-            wait=True,
-        )
-
-        return song_info
+        return spoken_message
 
     # ============================================================
-    # ANNOUNCE ONLY CHORDS
+    # LOW-LEVEL SPEECH
     # ============================================================
 
-    def announce_chords(
-        self,
-        chords: Iterable,
-        max_chords: int = 16,
-    ):
-        """
-        Announce only the chord progression.
-        """
+    def _speak(self, text: str) -> None:
+        """Speak the given text, swallowing any runtime engine errors."""
 
-        clean_chord_list = self.clean_chords(
-            chords
-        )
+        try:
+            self.engine.say(text)
+            self.engine.runAndWait()
 
-        chord_text = self.format_chords(
-            clean_chord_list,
-            max_chords=max_chords,
-        )
-
-        self.speak(
-            f"The chord progression is {chord_text}.",
-            wait=True,
-        )
+        except Exception as e:
+            print(f"[IEMManager] Speech playback failed: {e}")
 
     # ============================================================
-    # LIST AVAILABLE VOICES
+    # SHUTDOWN
     # ============================================================
 
-    def list_voices(self):
-        """
-        Return the voices available to pyttsx3.
-        """
+    def shutdown(self) -> None:
+        """Release the TTS engine, if one was initialized."""
 
-        voices = self.engine.getProperty("voices")
+        if self.engine is not None:
+            try:
+                self.engine.stop()
+            except Exception:
+                pass
 
-        voice_list = []
-
-        for index, voice in enumerate(voices):
-            voice_list.append(
-                {
-                    "id": index,
-                    "name": voice.name,
-                    "voice_id": voice.id,
-                }
-            )
-
-        return voice_list
-
-    # ============================================================
-    # STOP / CLEANUP
-    # ============================================================
-
-    def stop(self):
-        """
-        Stop the current speech.
-        """
-
-        self.engine.stop()
+            self.engine = None

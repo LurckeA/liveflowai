@@ -7,7 +7,7 @@ from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
 from liveflowai.detection.song_predictor import SongPredictor
 from liveflowai.audio.audio_file_selector import AudioFileSelector
-# from liveflowai.output.iem_manager import IEMManager
+from liveflowai.output.iem_manager import IEMManager
 from liveflowai.database.database import DatabaseLogic
 
 
