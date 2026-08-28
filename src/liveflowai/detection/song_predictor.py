@@ -1,71 +1,58 @@
 # src/liveflowai/detection/song_predictor.py
 
-from typing import Optional
+from typing import Optional, List, Tuple
 
 
 class SongPredictor:
     """
-    Predict a song by comparing a live 5-second chord recording
-    against the first five chords of songs stored in the database.
+    Predict a song by comparing a five-chord sequence detected
+    from the microphone against the first five chords of every
+    song stored in the database.
     """
 
     def __init__(
         self,
-        db,
         chord_detector,
+        db,
         recording_duration: float = 5.0,
+        segment_duration: float = 1.0,
     ):
-        self.db = db
         self.chord_detector = chord_detector
+        self.db = db
+
         self.recording_duration = recording_duration
+        self.segment_duration = segment_duration
+
+        self.last_recording = []
+
+        print(
+            "SongPredictor initialized."
+        )
 
     # ============================================================
     # NORMALIZE CHORD
     # ============================================================
 
     @staticmethod
-    def normalize_chord(chord: str) -> str:
-        """
-        Normalize a chord name for comparison.
+    def _normalize_chord(chord: str) -> str:
+        """Normalize a chord name before comparison."""
 
-        Example:
-            " C " -> "C"
-            "Em"  -> "Em"
-        """
-
-        return str(chord).strip()
+        return chord.strip()
 
     # ============================================================
-    # COMPARE CHORDS
+    # NORMALIZE SEQUENCE
     # ============================================================
 
-    def chords_match(
+    def _normalize_sequence(
         self,
-        recorded_chords: list[str],
-        stored_chords: list[str],
-    ) -> bool:
-        """
-        Check whether the recorded chord sequence matches
-        the stored first-five chord sequence.
-        """
+        chords: List[str],
+    ) -> List[str]:
+        """Normalize a complete chord sequence."""
 
-        if len(recorded_chords) < 5:
-            return False
-
-        if len(stored_chords) < 5:
-            return False
-
-        recorded = [
-            self.normalize_chord(chord)
-            for chord in recorded_chords[:5]
+        return [
+            self._normalize_chord(chord)
+            for chord in chords
         ]
-
-        stored = [
-            self.normalize_chord(chord)
-            for chord in stored_chords[:5]
-        ]
-
-        return recorded == stored
 
     # ============================================================
     # FIND MATCH
@@ -73,121 +60,253 @@ class SongPredictor:
 
     def find_match(
         self,
-        recorded_chords: list[str],
-    ) -> Optional[str]:
+        detected_chords: List[str],
+    ) -> Optional[Tuple[str, List[str]]]:
         """
-        Compare the recorded chords against every song
-        in the database.
+        Compare detected chords against every song in the database.
 
         Returns:
-            Song name if a match is found.
-            None if there is no match.
+            (song_name, first_five_chords)
+
+        or:
+
+            None
         """
 
-        files = self.db.FetchAllDB()
+        detected_chords = (
+            self._normalize_sequence(
+                detected_chords
+            )
+        )
 
-        if not files:
+        if len(detected_chords) != 5:
             return None
 
-        for row in files:
-            song = row[0]
+        songs = (
+            self.db.FetchAllFirstFiveChords()
+        )
 
-            stored_chords = (
-                self.db.FetchFirstFiveChords(song)
+        if not songs:
+            return None
+
+        for song, first_five in songs:
+
+            database_chords = (
+                self._normalize_sequence(
+                    first_five
+                )
             )
 
-            if self.chords_match(
-                recorded_chords,
-                stored_chords,
-            ):
-                return song
+            if detected_chords == database_chords:
+                return (
+                    song,
+                    database_chords,
+                )
 
         return None
 
     # ============================================================
-    # PREDICT
+    # SHOW DATABASE
     # ============================================================
 
-    def predict(self):
+    def show_candidates(self):
+        """Display the chord sequences available for prediction."""
+
+        songs = (
+            self.db.FetchAllFirstFiveChords()
+        )
+
+        if not songs:
+            print(
+                "\nNo songs with at least "
+                "five chords found in database."
+            )
+
+            return
+
+        print(
+            "\n=== Song Predictor Database ==="
+        )
+
+        for song, chords in songs:
+            print(
+                f"{song}: "
+                f"{', '.join(chords)}"
+            )
+
+    # ============================================================
+    # ONE PREDICTION ATTEMPT
+    # ============================================================
+
+    def predict_once(self) -> Optional[str]:
         """
-        Continuously record five seconds of chords and try
-        to identify the song.
+        Record five seconds and attempt to identify a song.
 
-        If no song matches, another five-second recording
-        is made and the previous recording is discarded.
+        Returns:
+            Song name if matched.
+            None if no match.
         """
 
-        print("\n=== SONG PREDICTOR ===")
+        detected_chords = (
+            self.chord_detector.record_chord_sequence(
+                duration=self.recording_duration,
+                segment_duration=self.segment_duration,
+            )
+        )
 
-        files = self.db.FetchAllDB()
+        # Replace the previous recording.
+        self.last_recording = detected_chords
 
-        if not files:
-            print("No songs are stored in the database.")
+        if not detected_chords:
+            print(
+                "\n⚠ No usable chord sequence "
+                "was detected."
+            )
+
             return None
 
         print(
-            "\nPlay the beginning of a song."
+            "\nDetected sequence:"
         )
+
         print(
-            "LIVEFLOWAI will listen for 5 seconds..."
+            f"  {', '.join(detected_chords)}"
         )
+
+        print(
+            "\nSearching database..."
+        )
+
+        match = self.find_match(
+            detected_chords
+        )
+
+        if match is None:
+            print(
+                "\n✗ No song matched "
+                "the five-chord sequence."
+            )
+
+            return None
+
+        song, chords = match
+
+        print(
+            "\n✓ SONG MATCH FOUND!"
+        )
+
+        print(
+            f"  Song: {song}"
+        )
+
+        print(
+            f"  Chords: {', '.join(chords)}"
+        )
+
+        return song
+
+    # ============================================================
+    # PREDICT UNTIL MATCH
+    # ============================================================
+
+    def predict_until_match(self) -> Optional[str]:
+        """
+        Continuously record five seconds and search for a song.
+
+        Every failed attempt is replaced by a new five-second
+        recording.
+
+        Stops when:
+            - A song is matched.
+            - Ctrl+C is pressed.
+        """
+
+        songs = (
+            self.db.FetchAllFirstFiveChords()
+        )
+
+        if not songs:
+            print(
+                "\n✗ There are no songs with "
+                "at least five chords in the database."
+            )
+
+            return None
+
+        print(
+            "\n=== SONG PREDICTOR ==="
+        )
+
+        print(
+            "The system will record five seconds "
+            "at a time."
+        )
+
+        print(
+            "Each recording replaces the previous "
+            "recording."
+        )
+
+        print(
+            "The predictor will continue until "
+            "a song is matched."
+        )
+
+        print(
+            "\nSongs available for prediction:"
+        )
+
+        for song, chords in songs:
+            print(
+                f"  - {song}: "
+                f"{', '.join(chords)}"
+            )
 
         attempt = 1
 
-        while True:
-
-            print(
-                f"\n--- Recording attempt {attempt} ---"
-            )
-
-            # ----------------------------------------------------
-            # Record and detect chords
-            # ----------------------------------------------------
-
-            recorded_chords = (
-                self.chord_detector.record_chords(
-                    duration=self.recording_duration
-                )
-            )
-
-            print(
-                "\nDetected chords:"
-            )
-
-            if recorded_chords:
-                print(
-                    ", ".join(recorded_chords)
-                )
-            else:
-                print("No chords detected.")
-
-            # ----------------------------------------------------
-            # Try to find a song
-            # ----------------------------------------------------
-
-            matched_song = self.find_match(
-                recorded_chords
-            )
-
-            if matched_song is not None:
+        try:
+            while True:
 
                 print(
-                    f"\n✓ Song matched: "
-                    f"{matched_song}"
+                    f"\n{'=' * 55}"
                 )
 
-                return matched_song
+                print(
+                    f"Prediction attempt #{attempt}"
+                )
 
-            # ----------------------------------------------------
-            # No match
-            # ----------------------------------------------------
+                print(
+                    f"{'=' * 55}"
+                )
+
+                result = self.predict_once()
+
+                if result is not None:
+
+                    print(
+                        "\n🎵 Predicted song:"
+                    )
+
+                    print(
+                        f"   {result}"
+                    )
+
+                    return result
+
+                attempt += 1
+
+                print(
+                    "\nNo match."
+                )
+
+                print(
+                    "Recording another five seconds..."
+                )
+
+        except KeyboardInterrupt:
 
             print(
-                "\n✗ No matching song found."
+                "\n\nSong prediction cancelled."
             )
 
-            print(
-                "Recording another 5 seconds..."
-            )
-
-            attempt += 1
+            return None
