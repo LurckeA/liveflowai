@@ -83,22 +83,6 @@ def analyze_audio_file(
             )
 
         # ---------------------------------------------------------
-        # Initialize IEM Manager
-        # ---------------------------------------------------------
-
-        iem_manager = IEMManager()
-
-        # Announce the next song information
-        iem_manager.announce_next_song(
-            title=file_path.stem,
-            duration_seconds=(
-                tempo_result["duration"]
-            ),
-            bpm=tempo_result["tempo_bpm"],
-            chords=chords,
-        )
-
-        # ---------------------------------------------------------
         # Convert chords to database string
         # ---------------------------------------------------------
 
@@ -261,47 +245,40 @@ def show_audio_files(db):
         )
 
 
-def start_live_detection(
-    chord_detector,
+def start_performance(
+    song_predictor,
 ):
-    """Start live chord detection from microphone."""
+    """
+    Start a live performance session.
+
+    This runs live chord detection and song prediction together:
+
+        1. Records a 15-second window of audio.
+        2. Prints each detected chord live, segment by segment,
+           as the recording happens.
+        3. Compares the recorded chords (order ignored, Unknown
+           chords ignored) against the first five chords of
+           every song in the database.
+        4. If no song matches well enough, the previous
+           recording is discarded and a new 15-second window
+           is recorded and compared again.
+        5. Repeats until a song is identified or the user
+           presses Ctrl+C.
+    """
 
     try:
 
         print(
-            "\n=== Starting Live "
-            "Chord Detection ==="
+            "\n=== Starting Performance ==="
+        )
+
+        print(
+            "Play your instrument. LiveFlowAI will listen in "
+            "15-second windows and try to identify the song."
         )
 
         print(
             "Press Ctrl+C to stop...\n"
-        )
-
-        chord_detector.start_detection()
-
-    except KeyboardInterrupt:
-
-        print(
-            "\nLive detection stopped."
-        )
-
-    except Exception as e:
-
-        print(
-            f"Error in live detection: {e}"
-        )
-
-
-def start_song_prediction(
-    song_predictor,
-):
-    """Start the five-chord song predictor."""
-
-    try:
-
-        print(
-            "\n=== Starting "
-            "Song Predictor ==="
         )
 
         song_predictor.predict_until_match()
@@ -309,13 +286,13 @@ def start_song_prediction(
     except KeyboardInterrupt:
 
         print(
-            "\nSong prediction stopped."
+            "\nPerformance stopped."
         )
 
     except Exception as e:
 
         print(
-            f"Error in song predictor: {e}"
+            f"Error during performance: {e}"
         )
 
 
@@ -362,7 +339,9 @@ def main():
     # ---------------------------------------------------------
     # Initialize song predictor
     #
-    # It uses the SAME LiveChordDetector instance.
+    # It uses the SAME LiveChordDetector instance, which is
+    # what drives both live chord feedback and the recording
+    # used for matching during a performance.
     # ---------------------------------------------------------
 
     song_predictor = SongPredictor(
@@ -397,19 +376,15 @@ def main():
             )
 
             print(
-                "3. Start Live Chord Detection"
+                "3. Start Performance"
             )
 
             print(
-                "4. Predict Song"
-            )
-
-            print(
-                "5. Exit"
+                "4. Exit"
             )
 
             user_input = input(
-                "Enter your choice (1-5): "
+                "Enter your choice (1-4): "
             ).strip()
 
             # -------------------------------------------------
@@ -441,8 +416,8 @@ def main():
 
             elif user_input == "3":
 
-                start_live_detection(
-                    chord_detector
+                start_performance(
+                    song_predictor
                 )
 
             # -------------------------------------------------
@@ -450,16 +425,6 @@ def main():
             # -------------------------------------------------
 
             elif user_input == "4":
-
-                start_song_prediction(
-                    song_predictor
-                )
-
-            # -------------------------------------------------
-            # Option 5
-            # -------------------------------------------------
-
-            elif user_input == "5":
 
                 print(
                     "\nThank you for using "
@@ -472,7 +437,7 @@ def main():
 
                 print(
                     "Invalid choice. "
-                    "Please enter 1, 2, 3, 4, or 5."
+                    "Please enter 1, 2, 3, or 4."
                 )
 
         except KeyboardInterrupt:
