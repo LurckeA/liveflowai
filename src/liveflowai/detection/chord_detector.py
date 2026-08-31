@@ -853,7 +853,7 @@ class LiveChordDetector:
                 "\n\nRecording cancelled."
             )
 
-            return []
+            raise
 
         except Exception as error:
 

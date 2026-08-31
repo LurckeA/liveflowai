@@ -602,3 +602,124 @@ class SongPredictor:
             )
 
             return None
+
+    # ============================================================
+    # RUN CONTINUOUS PERFORMANCE
+    # ============================================================
+
+    def run_performance(self):
+        """
+        Continuously predict songs, one after another, until the
+        user presses Ctrl+C.
+
+        Unlike predict_until_match(), this does NOT stop once a
+        song is found — after a match, it immediately starts
+        listening for the next song. The only way to stop is
+        KeyboardInterrupt, which is intentionally NOT caught here
+        so it propagates to the caller.
+        """
+
+        songs = (
+            self.db.FetchAllFirstFiveChords()
+        )
+
+        if not songs:
+
+            print(
+                "\n✗ There are no songs with "
+                "at least five chords in the database."
+            )
+
+            return
+
+        print(
+            "\n=== SONG PREDICTOR (Performance Mode) ==="
+        )
+
+        print(
+            "Recording duration: "
+            f"{self.recording_duration:.0f} seconds"
+        )
+
+        print(
+            "Chord segment: "
+            f"{self.segment_duration:.1f} seconds"
+        )
+
+        print(
+            "Unknown chords: ignored"
+        )
+
+        print(
+            "Chord order: ignored"
+        )
+
+        print(
+            "Minimum match: "
+            f"{self.minimum_match}/5"
+        )
+
+        print(
+            "\nSongs available for prediction:"
+        )
+
+        for song, chords in songs:
+
+            print(
+                f"  - {song}: "
+                f"{', '.join(chords)}"
+            )
+
+        print(
+            "\nPress Ctrl+C at any time to stop the performance."
+        )
+
+        attempt = 1
+        song_number = 1
+
+        while True:
+
+            print(
+                f"\n{'=' * 60}"
+            )
+
+            print(
+                f"Listening for song #{song_number} "
+                f"(attempt #{attempt})"
+            )
+
+            print(
+                f"{'=' * 60}"
+            )
+
+            result = self.predict_once()
+
+            if result is not None:
+
+                print(
+                    "\n🎵 Predicted song:"
+                )
+
+                print(
+                    f"   {result}"
+                )
+
+                song_number += 1
+                attempt = 1
+
+                print(
+                    "\nReady for the next song..."
+                )
+
+                continue
+
+            attempt += 1
+
+            print(
+                "\nNo sufficient match."
+            )
+
+            print(
+                "Recording another "
+                f"{self.recording_duration:.0f} seconds..."
+            )

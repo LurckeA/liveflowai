@@ -244,14 +244,13 @@ def show_audio_files(db):
             f"Error fetching files: {e}\n"
         )
 
-
 def start_performance(
     song_predictor,
 ):
     """
     Start a live performance session.
 
-    This runs live chord detection and song prediction together:
+    This runs continuously:
 
         1. Records a 15-second window of audio.
         2. Prints each detected chord live, segment by segment,
@@ -262,8 +261,10 @@ def start_performance(
         4. If no song matches well enough, the previous
            recording is discarded and a new 15-second window
            is recorded and compared again.
-        5. Repeats until a song is identified or the user
-           presses Ctrl+C.
+        5. If a song IS matched, it's announced and the
+           predictor immediately starts listening for the next
+           song — it does NOT return to the menu.
+        6. The only way to stop is pressing Ctrl+C.
     """
 
     try:
@@ -274,14 +275,15 @@ def start_performance(
 
         print(
             "Play your instrument. LiveFlowAI will listen in "
-            "15-second windows and try to identify the song."
+            "15-second windows and try to identify each song, "
+            "one after another."
         )
 
         print(
-            "Press Ctrl+C to stop...\n"
+            "Press Ctrl+C to stop the performance...\n"
         )
 
-        song_predictor.predict_until_match()
+        song_predictor.run_performance()
 
     except KeyboardInterrupt:
 
@@ -294,7 +296,6 @@ def start_performance(
         print(
             f"Error during performance: {e}"
         )
-
 
 def main():
 
