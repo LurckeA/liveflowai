@@ -272,19 +272,11 @@ def start_performance(
     """
     Start a live performance session.
 
-    This runs live chord detection and song prediction together:
+    The song predictor listens through the microphone.
+    Once a song is identified, the IEM manager announces
+    the song and starts the metronome at the song BPM.
 
-        1. Records a 15-second window of audio.
-        2. Prints each detected chord live, segment by segment,
-           as the recording happens.
-        3. Compares the recorded chords (order ignored, Unknown
-           chords ignored) against the first five chords of
-           every song in the database.
-        4. If no song matches well enough, the previous
-           recording is discarded and a new 15-second window
-           is recorded and compared again.
-        5. Repeats until a song is identified or the user
-           presses Ctrl+C.
+    Ctrl+C stops the performance and metronome.
     """
 
     try:
@@ -299,10 +291,15 @@ def start_performance(
         )
 
         print(
+            "Once a song is identified, the metronome will "
+            "start at its BPM."
+        )
+
+        print(
             "Press Ctrl+C to stop...\n"
         )
 
-        song_predictor.predict_until_match()
+        song_predictor.run_performance()
 
     except KeyboardInterrupt:
 
@@ -315,6 +312,11 @@ def start_performance(
         print(
             f"Error during performance: {e}"
         )
+
+    finally:
+
+        # Always stop the metronome when performance ends.
+        iem_manager.stop_metronome()
 
 
 def main():

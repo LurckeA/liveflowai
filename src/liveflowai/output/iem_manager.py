@@ -2,24 +2,33 @@
 
 from typing import Iterable, Optional
 import base64
+import math
+import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import threading
-import time
+import wave
+import struct
 
 
 class IEMManager:
     """
-    IEM announcement and metronome manager.
+    LIVEFLOWAI IEM manager.
 
     Features:
-        - Announces next song information
+        - Announces the predicted song
         - Announces duration, BPM, and opening chords
-        - Text-to-speech
-        - Continuous background metronome
-        - WSL-compatible Windows audio output
+        - Windows/WSL text-to-speech
+        - Accurate continuous metronome
+        - Automatic metronome BPM from predicted song
+        - Metronome can be stopped/restarted safely
     """
+
+    # ============================================================
+    # INITIALIZATION
+    # ============================================================
 
     def __init__(
         self,
@@ -47,8 +56,17 @@ class IEMManager:
 
         self.metronome_running = False
         self.metronome_bpm = 120.0
+
         self.metronome_thread = None
+        self.metronome_process = None
+
         self.metronome_stop_event = threading.Event()
+
+        self.metronome_click_file = None
+
+        # Used to prevent an old metronome process from
+        # continuing after a new BPM is selected.
+        self._metronome_lock = threading.Lock()
 
     # ============================================================
     # PLATFORM DETECTION
@@ -107,15 +125,17 @@ class IEMManager:
                 return
 
             print(
-                "[IEMManager] Windows PowerShell unavailable. "
+                "[IEMManager] "
+                "Windows PowerShell unavailable. "
                 "Speech disabled."
             )
 
             self.enable_speech = False
+
             return
 
         # --------------------------------------------------------
-        # Native pyttsx3
+        # Native Windows/Linux
         # --------------------------------------------------------
 
         try:
@@ -269,21 +289,29 @@ class IEMManager:
     # SPEECH
     # ============================================================
 
-    def _speak(self, text: str) -> None:
+    def _speak(
+        self,
+        text: str,
+    ) -> None:
         """Speak using the selected backend."""
 
         if self.speech_backend == "windows":
+
             self._speak_windows(text)
 
         elif self.speech_backend == "pyttsx3":
+
             self._speak_pyttsx3(text)
 
     # ============================================================
     # WINDOWS SPEECH
     # ============================================================
 
-    def _speak_windows(self, text: str) -> None:
-        """Use Windows SpeechSynthesizer."""
+    def _speak_windows(
+        self,
+        text: str,
+    ) -> None:
+        """Use Windows SpeechSynthesizer through WSL."""
 
         try:
 
@@ -374,7 +402,239 @@ $synth.Dispose()
             )
 
     # ============================================================
-    # METRONOME
+    # METRONOME CLICK TRACK GENERATION
+    # ============================================================
+
+    def _create_metronome_track(
+        self,
+        bpm: float,
+        duration_seconds: float = 300.0,
+    ) -> str:
+        """
+        Generate a long WAV click track.
+
+        The important difference from the previous implementation
+        is that PowerShell is NOT started for every beat.
+
+        Instead, all beats are placed into one WAV file with exact
+        sample positions.
+
+        300 seconds = 5 minutes.
+
+        At 44.1 kHz this gives very accurate beat spacing.
+        """
+
+        sample_rate = 44100
+
+        # --------------------------------------------------------
+        # Click properties
+        # --------------------------------------------------------
+
+        click_duration = 0.075
+
+        normal_frequency = 1200.0
+        accent_frequency = 1700.0
+
+        normal_volume = 0.75
+        accent_volume = 0.90
+
+        click_samples = int(
+            sample_rate * click_duration
+        )
+
+        total_samples = int(
+            sample_rate * duration_seconds
+        )
+
+        # --------------------------------------------------------
+        # Calculate exact beat interval.
+        #
+        # We calculate beat positions directly from BPM instead
+        # of repeatedly sleeping 60/BPM.
+        # --------------------------------------------------------
+
+        beat_interval = (
+            60.0 / bpm
+        )
+
+        # --------------------------------------------------------
+        # Output file
+        # --------------------------------------------------------
+
+        path = os.path.join(
+            tempfile.gettempdir(),
+            "liveflow_metronome.wav",
+        )
+
+        # --------------------------------------------------------
+        # Build click samples once.
+        # --------------------------------------------------------
+
+        normal_click = []
+
+        accent_click = []
+
+        for i in range(click_samples):
+
+            t = i / sample_rate
+
+            # Exponential-ish decay.
+
+            envelope = (
+                1.0
+                - (i / click_samples)
+            )
+
+            envelope = envelope ** 2
+
+            normal_value = int(
+                32767
+                * normal_volume
+                * envelope
+                * math.sin(
+                    2
+                    * math.pi
+                    * normal_frequency
+                    * t
+                )
+            )
+
+            accent_value = int(
+                32767
+                * accent_volume
+                * envelope
+                * math.sin(
+                    2
+                    * math.pi
+                    * accent_frequency
+                    * t
+                )
+            )
+
+            normal_click.append(
+                struct.pack(
+                    "<h",
+                    normal_value,
+                )
+            )
+
+            accent_click.append(
+                struct.pack(
+                    "<h",
+                    accent_value,
+                )
+            )
+
+        # --------------------------------------------------------
+        # Generate WAV
+        # --------------------------------------------------------
+
+        with wave.open(
+            path,
+            "wb",
+        ) as wav:
+
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+
+            # ----------------------------------------------------
+            # Write silence/beat positions.
+            # ----------------------------------------------------
+
+            current_sample = 0
+            beat_number = 0
+
+            # A zero sample.
+
+            silence_sample = struct.pack(
+                "<h",
+                0,
+            )
+
+            while current_sample < total_samples:
+
+                # Exact beat position.
+
+                beat_time = (
+                    beat_number
+                    * beat_interval
+                )
+
+                beat_sample = int(
+                    round(
+                        beat_time
+                        * sample_rate
+                    )
+                )
+
+                # Silence between previous beat and
+                # current beat.
+
+                silence_samples = (
+                    beat_sample
+                    - current_sample
+                )
+
+                if silence_samples > 0:
+
+                    # Write silence in chunks so we don't
+                    # create an enormous Python object.
+
+                    chunk_size = 44100
+
+                    while silence_samples > 0:
+
+                        chunk = min(
+                            silence_samples,
+                            chunk_size,
+                        )
+
+                        wav.writeframes(
+                            silence_sample
+                            * chunk
+                        )
+
+                        current_sample += chunk
+                        silence_samples -= chunk
+
+                # ------------------------------------------------
+                # Click
+                # ------------------------------------------------
+
+                if current_sample >= total_samples:
+                    break
+
+                click_data = (
+                    accent_click
+                    if beat_number % 4 == 0
+                    else normal_click
+                )
+
+                remaining = (
+                    total_samples
+                    - current_sample
+                )
+
+                click_count = min(
+                    len(click_data),
+                    remaining,
+                )
+
+                wav.writeframes(
+                    b"".join(
+                        click_data[:click_count]
+                    )
+                )
+
+                current_sample += click_count
+
+                beat_number += 1
+
+        return path
+
+    # ============================================================
+    # START METRONOME
     # ============================================================
 
     def start_metronome(
@@ -382,54 +642,84 @@ $synth.Dispose()
         bpm: float,
     ) -> None:
         """
-        Start the metronome in a background thread.
+        Start the metronome at the specified BPM.
 
-        The metronome continues until stop_metronome()
-        is called.
+        The previous metronome is stopped first.
 
         Example:
 
-            iem.start_metronome(99)
+            iem_manager.start_metronome(99)
         """
 
+        # --------------------------------------------------------
+        # Validate BPM
+        # --------------------------------------------------------
+
         try:
+
             bpm = float(bpm)
 
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError,
+        ):
+
             print(
-                "[IEMManager] Invalid metronome BPM."
+                "[IEMManager] "
+                "Invalid metronome BPM."
             )
+
             return
 
         if bpm <= 0:
+
             print(
-                "[IEMManager] BPM must be greater than 0."
+                "[IEMManager] "
+                "BPM must be greater than 0."
             )
+
             return
 
         if bpm > 300:
+
             print(
-                "[IEMManager] BPM cannot exceed 300."
+                "[IEMManager] "
+                "BPM cannot exceed 300."
             )
+
             return
 
-        # Stop an existing metronome first.
+        # --------------------------------------------------------
+        # Stop previous metronome.
+        # --------------------------------------------------------
+
         self.stop_metronome()
 
+        # --------------------------------------------------------
+        # Store BPM
+        # --------------------------------------------------------
+
         self.metronome_bpm = bpm
-        self.metronome_running = True
+
         self.metronome_stop_event.clear()
+
+        self.metronome_running = True
+
+        # --------------------------------------------------------
+        # Start background thread.
+        # --------------------------------------------------------
 
         self.metronome_thread = threading.Thread(
             target=self._metronome_loop,
             daemon=True,
+            name="LIVEFLOWAI-Metronome",
         )
 
         self.metronome_thread.start()
 
         print(
-            f"[IEMManager] "
-            f"Metronome started: {bpm:.0f} BPM"
+            "[IEMManager] "
+            f"Metronome started at {bpm:.2f} BPM"
         )
 
     # ============================================================
@@ -437,101 +727,341 @@ $synth.Dispose()
     # ============================================================
 
     def _metronome_loop(self):
-        """Continuously generate metronome beats."""
+        """
+        Generate and play the click track.
 
-        next_beat = time.perf_counter()
+        The entire click track is sent to Windows as one audio
+        playback operation instead of spawning PowerShell for
+        every click.
+        """
 
-        while not self.metronome_stop_event.is_set():
+        try:
 
-            # Read current BPM each beat so it can be changed
-            # while the metronome is running.
-            bpm = self.metronome_bpm
+            while not self.metronome_stop_event.is_set():
 
-            interval = 60.0 / bpm
+                bpm = self.metronome_bpm
 
-            # Make the click.
-            self._metronome_click()
+                # ------------------------------------------------
+                # Generate a 5-minute click track.
+                # ------------------------------------------------
 
-            # Schedule next beat.
-            next_beat += interval
-
-            sleep_time = (
-                next_beat
-                - time.perf_counter()
-            )
-
-            if sleep_time > 0:
-
-                self.metronome_stop_event.wait(
-                    sleep_time
+                click_file = (
+                    self._create_metronome_track(
+                        bpm=bpm,
+                        duration_seconds=300.0,
+                    )
                 )
 
-            else:
+                self.metronome_click_file = click_file
 
-                # We fell behind. Reset timing rather than
-                # rapidly firing several catch-up clicks.
-                next_beat = time.perf_counter()
+                # ------------------------------------------------
+                # Play it.
+                # ------------------------------------------------
 
-        self.metronome_running = False
+                if self._is_wsl():
+
+                    self._play_wsl_wav(
+                        click_file
+                    )
+
+                elif platform.system() == "Windows":
+
+                    self._play_windows_wav(
+                        click_file
+                    )
+
+                else:
+
+                    self._play_linux_wav(
+                        click_file
+                    )
+
+                # ------------------------------------------------
+                # If playback ended normally, loop again.
+                #
+                # This normally happens after 5 minutes.
+                # ------------------------------------------------
+
+        except Exception as e:
+
+            print(
+                "[IEMManager] "
+                f"Metronome error: {e}"
+            )
+
+        finally:
+
+            self.metronome_running = False
 
     # ============================================================
-    # METRONOME CLICK
+    # PLAY WAV THROUGH WSL → WINDOWS
     # ============================================================
 
-    def _metronome_click(self):
+    def _play_wsl_wav(
+        self,
+        click_file: str,
+    ) -> None:
         """
-        Play one audible metronome click through Windows.
+        Play a WAV file using Windows SoundPlayer.
 
-        Works from WSL by calling powershell.exe.
+        A PowerShell process is started ONCE for the whole
+        click track, not once per click.
         """
 
-        if self._is_wsl():
+        try:
 
-            if not shutil.which("powershell.exe"):
-                return
+            # ----------------------------------------------------
+            # PowerShell needs a Windows-accessible path.
+            #
+            # WSL paths can be converted using wslpath.
+            # ----------------------------------------------------
+
+            windows_path = None
 
             try:
-                subprocess.run(
+
+                result = subprocess.run(
                     [
-                        "powershell.exe",
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-Command",
-                        "[console]::beep(1000,45)",
+                        "wslpath",
+                        "-w",
+                        click_file,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                windows_path = result.stdout.strip()
+
+            except Exception:
+
+                windows_path = click_file
+
+            # ----------------------------------------------------
+            # Escape single quotes for PowerShell.
+            # ----------------------------------------------------
+
+            safe_path = windows_path.replace(
+                "'",
+                "''",
+            )
+
+            command = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "Add-Type -AssemblyName System.Media; "
+                "$player = New-Object "
+                "System.Media.SoundPlayer; "
+                f"$player.SoundLocation = '{safe_path}'; "
+                "$player.Load(); "
+                "$player.PlaySync(); "
+                "$player.Dispose();"
+            )
+
+            # ----------------------------------------------------
+            # Start ONE PowerShell process for the entire track.
+            # ----------------------------------------------------
+
+            process = subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    command,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            with self._metronome_lock:
+
+                self.metronome_process = process
+
+            # ----------------------------------------------------
+            # Wait until:
+            #
+            # 1. Track finishes
+            # OR
+            # 2. stop_metronome() asks us to stop.
+            # ----------------------------------------------------
+
+            while process.poll() is None:
+
+                if self.metronome_stop_event.wait(
+                    timeout=0.05
+                ):
+
+                    # Stop requested.
+
+                    try:
+
+                        process.terminate()
+
+                    except Exception:
+                        pass
+
+                    break
+
+            # ----------------------------------------------------
+            # Make sure process is dead.
+            # ----------------------------------------------------
+
+            if process.poll() is None:
+
+                try:
+
+                    process.kill()
+
+                except Exception:
+                    pass
+
+            with self._metronome_lock:
+
+                if self.metronome_process is process:
+
+                    self.metronome_process = None
+
+        except Exception as e:
+
+            print(
+                "[IEMManager] "
+                f"WSL metronome playback failed: {e}"
+            )
+
+    # ============================================================
+    # PLAY WAV ON NATIVE WINDOWS
+    # ============================================================
+
+    def _play_windows_wav(
+        self,
+        click_file: str,
+    ) -> None:
+
+        try:
+
+            import winsound
+
+            # winsound plays the whole WAV continuously.
+
+            winsound.PlaySound(
+                click_file,
+                winsound.SND_FILENAME,
+            )
+
+        except Exception as e:
+
+            print(
+                "[IEMManager] "
+                f"Windows metronome playback failed: {e}"
+            )
+
+    # ============================================================
+    # LINUX FALLBACK
+    # ============================================================
+
+    def _play_linux_wav(
+        self,
+        click_file: str,
+    ) -> None:
+
+        # --------------------------------------------------------
+        # Try aplay first.
+        # --------------------------------------------------------
+
+        if shutil.which("aplay"):
+
+            try:
+
+                process = subprocess.Popen(
+                    [
+                        "aplay",
+                        "-q",
+                        click_file,
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    check=False,
                 )
+
+                with self._metronome_lock:
+
+                    self.metronome_process = process
+
+                while process.poll() is None:
+
+                    if self.metronome_stop_event.wait(
+                        timeout=0.05
+                    ):
+
+                        try:
+                            process.terminate()
+                        except Exception:
+                            pass
+
+                        break
+
+                with self._metronome_lock:
+
+                    if self.metronome_process is process:
+
+                        self.metronome_process = None
+
+                return
 
             except Exception:
                 pass
 
-            return
+        # --------------------------------------------------------
+        # Try paplay.
+        # --------------------------------------------------------
 
-        if platform.system() == "Windows":
+        if shutil.which("paplay"):
 
             try:
-                import winsound
 
-                winsound.Beep(
-                    1000,
-                    45,
+                process = subprocess.Popen(
+                    [
+                        "paplay",
+                        click_file,
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
+
+                with self._metronome_lock:
+
+                    self.metronome_process = process
+
+                while process.poll() is None:
+
+                    if self.metronome_stop_event.wait(
+                        timeout=0.05
+                    ):
+
+                        try:
+                            process.terminate()
+                        except Exception:
+                            pass
+
+                        break
+
+                with self._metronome_lock:
+
+                    if self.metronome_process is process:
+
+                        self.metronome_process = None
+
+                return
 
             except Exception:
                 pass
 
-            return
-
-        # Linux fallback
-    try:
-        print("\a", end="", flush=True)
-    except Exception:
-        pass
+        print(
+            "[IEMManager] "
+            "No Linux WAV playback device found."
+        )
 
     # ============================================================
-    # CHANGE METRONOME BPM
+    # CHANGE BPM
     # ============================================================
 
     def set_metronome_bpm(
@@ -539,21 +1069,26 @@ $synth.Dispose()
         bpm: float,
     ) -> None:
         """
-        Change the BPM of a running metronome.
+        Change the metronome BPM.
 
-        Example:
-
-            iem.set_metronome_bpm(99)
+        The current click track is stopped and a new one is
+        generated at the new BPM.
         """
 
         try:
+
             bpm = float(bpm)
 
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError,
+        ):
 
             print(
-                "[IEMManager] Invalid metronome BPM."
+                "[IEMManager] "
+                "Invalid metronome BPM."
             )
+
             return
 
         if bpm <= 0 or bpm > 300:
@@ -563,13 +1098,26 @@ $synth.Dispose()
                 "Metronome BPM must be between "
                 "1 and 300."
             )
+
             return
+
+        was_running = (
+            self.metronome_running
+        )
 
         self.metronome_bpm = bpm
 
+        if was_running:
+
+            self.stop_metronome()
+
+            self.start_metronome(
+                bpm
+            )
+
         print(
-            f"[IEMManager] "
-            f"Metronome BPM changed to {bpm:.0f}"
+            "[IEMManager] "
+            f"Metronome BPM set to {bpm:.2f}"
         )
 
     # ============================================================
@@ -577,29 +1125,107 @@ $synth.Dispose()
     # ============================================================
 
     def stop_metronome(self) -> None:
-        """Stop the background metronome."""
+        """
+        Stop the metronome immediately.
+        """
 
-        if not self.metronome_running:
-            return
+        # --------------------------------------------------------
+        # Signal thread.
+        # --------------------------------------------------------
 
         self.metronome_stop_event.set()
 
+        # --------------------------------------------------------
+        # Kill active PowerShell/audio process.
+        # --------------------------------------------------------
+
+        with self._metronome_lock:
+
+            process = (
+                self.metronome_process
+            )
+
+            self.metronome_process = None
+
+        if process is not None:
+
+            try:
+
+                if process.poll() is None:
+
+                    process.terminate()
+
+            except Exception:
+                pass
+
+            try:
+
+                process.wait(
+                    timeout=0.5
+                )
+
+            except Exception:
+
+                try:
+
+                    process.kill()
+
+                except Exception:
+                    pass
+
+        # --------------------------------------------------------
+        # Stop native Windows playback.
+        # --------------------------------------------------------
+
         if (
-            self.metronome_thread is not None
-            and self.metronome_thread.is_alive()
-            and threading.current_thread()
-            is not self.metronome_thread
+            platform.system() == "Windows"
+            and not self._is_wsl()
         ):
 
-            self.metronome_thread.join(
+            try:
+
+                import winsound
+
+                winsound.PlaySound(
+                    None,
+                    winsound.SND_PURGE,
+                )
+
+            except Exception:
+                pass
+
+        # --------------------------------------------------------
+        # Wait for metronome thread.
+        # --------------------------------------------------------
+
+        thread = (
+            self.metronome_thread
+        )
+
+        if (
+            thread is not None
+            and thread.is_alive()
+            and threading.current_thread()
+            is not thread
+        ):
+
+            thread.join(
                 timeout=1.0
             )
 
-        self.metronome_running = False
         self.metronome_thread = None
 
+        self.metronome_running = False
+
+        # --------------------------------------------------------
+        # Reset event so the next start works.
+        # --------------------------------------------------------
+
+        self.metronome_stop_event.clear()
+
         print(
-            "[IEMManager] Metronome stopped."
+            "[IEMManager] "
+            "Metronome stopped."
         )
 
     # ============================================================
@@ -607,28 +1233,52 @@ $synth.Dispose()
     # ============================================================
 
     def shutdown(self) -> None:
-        """Stop metronome and release speech engine."""
+        """
+        Completely shut down IEMManager.
+        """
+
+        print(
+            "[IEMManager] "
+            "Shutting down..."
+        )
 
         self.stop_metronome()
+
+        # --------------------------------------------------------
+        # Stop TTS
+        # --------------------------------------------------------
 
         if self.engine is not None:
 
             try:
+
                 self.engine.stop()
 
             except Exception:
                 pass
-if __name__ == "__main__":
 
-    iem = IEMManager(
-        enable_speech=False
-    )
+        # --------------------------------------------------------
+        # Delete generated metronome file.
+        # --------------------------------------------------------
 
-    iem.start_metronome(60)
+        if self.metronome_click_file:
 
-    try:
-        while True:
-            time.sleep(1)
+            try:
 
-    except KeyboardInterrupt:
-        iem.stop_metronome()    
+                if os.path.exists(
+                    self.metronome_click_file
+                ):
+
+                    os.remove(
+                        self.metronome_click_file
+                    )
+
+            except Exception:
+                pass
+
+        self.metronome_click_file = None
+
+        print(
+            "[IEMManager] "
+            "Shutdown complete."
+        )

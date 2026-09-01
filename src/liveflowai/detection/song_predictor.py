@@ -490,11 +490,24 @@ class SongPredictor:
 
                 duration, bpm = song_info
 
+                # ------------------------------------------------
+                # Announce the predicted song
+                # ------------------------------------------------
+
                 self.iem_manager.announce_next_song(
                     title=song,
                     duration_seconds=duration,
                     bpm=bpm,
                     chords=database_chords,
+                )
+                
+
+                # ------------------------------------------------
+                # Start metronome using the song's database BPM
+                # ------------------------------------------------
+
+                self.iem_manager.start_metronome(
+                    bpm
                 )
         return song
 
