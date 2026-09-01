@@ -16,6 +16,7 @@ def analyze_audio_file(
     analyzer,
     chord_analyzer,
     db,
+    iem_manager,
 ):
     """Analyze a single audio file and store results in database."""
 
@@ -90,7 +91,24 @@ def analyze_audio_file(
             str(chord)
             for chord in chords
         )
+        # ---------------------------------------------------------
+        # Convert chords to database string
+        # ---------------------------------------------------------
 
+        chords_string = ", ".join(
+            str(chord)
+            for chord in chords
+        )
+        # ---------------------------------------------------------
+        # Announce over IEM
+        # ---------------------------------------------------------
+
+        iem_manager.announce_next_song(
+            title=file_path.stem,
+            duration_seconds=tempo_result["duration"],
+            bpm=tempo_result["tempo_bpm"],
+            chords=chords,
+        )        
         # ---------------------------------------------------------
         # Visualize tempo
         # ---------------------------------------------------------
@@ -132,6 +150,7 @@ def analyze_audio_files(
     analyzer,
     chord_analyzer,
     db,
+    iem_manager,
 ):
     """
     Handle the audio-file selection and analysis workflow.
@@ -172,6 +191,7 @@ def analyze_audio_files(
             analyzer,
             chord_analyzer,
             db,
+            iem_manager,
         )
 
     print(
@@ -244,13 +264,15 @@ def show_audio_files(db):
             f"Error fetching files: {e}\n"
         )
 
+
 def start_performance(
     song_predictor,
+    iem_manager,
 ):
     """
     Start a live performance session.
 
-    This runs continuously:
+    This runs live chord detection and song prediction together:
 
         1. Records a 15-second window of audio.
         2. Prints each detected chord live, segment by segment,
@@ -261,10 +283,8 @@ def start_performance(
         4. If no song matches well enough, the previous
            recording is discarded and a new 15-second window
            is recorded and compared again.
-        5. If a song IS matched, it's announced and the
-           predictor immediately starts listening for the next
-           song — it does NOT return to the menu.
-        6. The only way to stop is pressing Ctrl+C.
+        5. Repeats until a song is identified or the user
+           presses Ctrl+C.
     """
 
     try:
@@ -275,15 +295,14 @@ def start_performance(
 
         print(
             "Play your instrument. LiveFlowAI will listen in "
-            "15-second windows and try to identify each song, "
-            "one after another."
+            "15-second windows and try to identify the song."
         )
 
         print(
-            "Press Ctrl+C to stop the performance...\n"
+            "Press Ctrl+C to stop...\n"
         )
 
-        song_predictor.run_performance()
+        song_predictor.predict_until_match()
 
     except KeyboardInterrupt:
 
@@ -296,6 +315,7 @@ def start_performance(
         print(
             f"Error during performance: {e}"
         )
+
 
 def main():
 
@@ -336,7 +356,11 @@ def main():
     db = DatabaseLogic()
 
     db.MakeDB()
+    # ---------------------------------------------------------
+    # Initialize IEM manager
+    # ---------------------------------------------------------
 
+    iem_manager = IEMManager()
     # ---------------------------------------------------------
     # Initialize song predictor
     #
@@ -350,6 +374,7 @@ def main():
         db=db,
         recording_duration=15.0,
         segment_duration=1.0,
+        iem_manager=iem_manager,
     )
 
     # ---------------------------------------------------------
@@ -399,6 +424,7 @@ def main():
                     analyzer,
                     chord_analyzer,
                     db,
+                    iem_manager,
                 )
 
             # -------------------------------------------------
@@ -418,7 +444,8 @@ def main():
             elif user_input == "3":
 
                 start_performance(
-                    song_predictor
+                    song_predictor,
+                    iem_manager,
                 )
 
             # -------------------------------------------------
@@ -426,6 +453,8 @@ def main():
             # -------------------------------------------------
 
             elif user_input == "4":
+
+                iem_manager.shutdown()
 
                 print(
                     "\nThank you for using "

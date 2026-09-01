@@ -26,18 +26,15 @@ class SongPredictor:
         db,
         recording_duration: float = 15.0,
         segment_duration: float = 1.0,
+        iem_manager=None,
         minimum_match: int = 4,
     ):
         self.chord_detector = chord_detector
         self.db = db
+        self.iem_manager = iem_manager
 
-        self.recording_duration = (
-            recording_duration
-        )
-
-        self.segment_duration = (
-            segment_duration
-        )
+        self.recording_duration = recording_duration
+        self.segment_duration = segment_duration
 
         # Number of the five database chords that must match.
         #
@@ -475,12 +472,30 @@ class SongPredictor:
             f"  Database chords: "
             f"{', '.join(database_chords)}"
         )
+            
 
         print(
             f"  Match: "
             f"{score}/5"
         )
+        # -------------------------------------------------------
+        # Announce over IEM, if a manager was provided.
+        # -------------------------------------------------------
 
+        if self.iem_manager is not None:
+
+            song_info = self.db.FetchSongInfo(song)
+
+            if song_info is not None:
+
+                duration, bpm = song_info
+
+                self.iem_manager.announce_next_song(
+                    title=song,
+                    duration_seconds=duration,
+                    bpm=bpm,
+                    chords=database_chords,
+                )
         return song
 
     # ============================================================

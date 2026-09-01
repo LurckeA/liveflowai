@@ -158,12 +158,67 @@ class DatabaseLogic:
             return []
 
     # ============================================================
-    # FETCH FIRST FIVE CHORDS
+    # FETCH SONG INFO
+    # ============================================================
+
+    def FetchSongInfo(self, song):
+        """
+        Fetch duration and bpm for a single song.
+
+        Returns:
+            (duration, bpm)
+            or None if the song isn't found.
+        """
+
+        try:
+
+            with self.ConnectDB() as conn:
+
+                c = conn.cursor()
+
+                c.execute(
+                    """
+                    SELECT duration, bpm
+                    FROM liveflow
+                    WHERE song = ?
+                    """,
+                    (song,),
+                )
+
+                row = c.fetchone()
+
+                if row is None:
+                    return None
+
+                return row[0], row[1]
+
+        except Exception as e:
+
+            print(
+                f"Error fetching song info: {e}"
+            )
+
+            return None
+
+    # ============================================================
+    # FETCH FIRST FIVE CHORDS FROM ONE SONG
     # ============================================================
 
     def FetchFirstFiveChords(self, song):
         """
         Fetch the first five chords from one song.
+
+        Returns:
+            [
+                chord1,
+                chord2,
+                chord3,
+                chord4,
+                chord5
+            ]
+
+        Returns an empty list if the song is not found
+        or contains no chords.
         """
 
         try:
@@ -186,14 +241,14 @@ class DatabaseLogic:
                 if row is None:
                     return []
 
-                chords = row[0]
+                chords_string = row[0]
 
-                if not chords:
+                if not chords_string:
                     return []
 
                 chords = [
                     chord.strip()
-                    for chord in chords.split(",")
+                    for chord in chords_string.split(",")
                     if chord.strip()
                 ]
 
@@ -202,34 +257,37 @@ class DatabaseLogic:
         except Exception as e:
 
             print(
-                f"Error fetching five chords: {e}"
+                f"Error fetching first five chords: {e}"
             )
 
             return []
 
     # ============================================================
-    # FETCH FIRST FIVE CHORDS FROM EVERY SONG
+    # FETCH FIRST FIVE CHORDS
     # ============================================================
 
-    def FetchAllFirstFiveChords(self):
+    def FetchAllFirstFiveChords(self, song=None):
         """
-        Fetch the first five chords from every song.
+        Fetch the first five chords.
 
-        Returns:
+        If song is provided:
+            Returns the first five chords for that song.
 
-            [
-                (
-                    song_name,
-                    [
-                        chord1,
-                        chord2,
-                        chord3,
-                        chord4,
-                        chord5,
-                    ]
-                ),
-                ...
-            ]
+        If song is None:
+            Returns the first five chords from every song.
+
+        Examples:
+
+            FetchAllFirstFiveChords()
+                ->
+                [
+                    ("Song A", ["C", "G", "Am", "F", "C"]),
+                    ("Song B", ["D", "A", "Bm", "G", "D"])
+                ]
+
+            FetchAllFirstFiveChords("Mary Had a Little Lamb")
+                ->
+                ["C", "G", "C", "C", "G"]
         """
 
         try:
@@ -237,6 +295,43 @@ class DatabaseLogic:
             with self.ConnectDB() as conn:
 
                 c = conn.cursor()
+
+                # ------------------------------------------------
+                # ONE SONG
+                # ------------------------------------------------
+
+                if song is not None:
+
+                    c.execute(
+                        """
+                        SELECT chords
+                        FROM liveflow
+                        WHERE song = ?
+                        """,
+                        (song,),
+                    )
+
+                    row = c.fetchone()
+
+                    if row is None:
+                        return []
+
+                    chords_string = row[0]
+
+                    if not chords_string:
+                        return []
+
+                    chords = [
+                        chord.strip()
+                        for chord in chords_string.split(",")
+                        if chord.strip()
+                    ]
+
+                    return chords[:5]
+
+                # ------------------------------------------------
+                # ALL SONGS
+                # ------------------------------------------------
 
                 c.execute("""
                     SELECT song, chords
@@ -248,7 +343,7 @@ class DatabaseLogic:
 
             results = []
 
-            for song, chords_string in rows:
+            for song_name, chords_string in rows:
 
                 if not chords_string:
                     continue
@@ -264,7 +359,7 @@ class DatabaseLogic:
 
                 results.append(
                     (
-                        song,
+                        song_name,
                         chords[:5],
                     )
                 )
