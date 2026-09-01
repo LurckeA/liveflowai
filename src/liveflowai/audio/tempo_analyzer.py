@@ -1,11 +1,27 @@
 # src/liveflowai/audio/tempo_analyzer.py
 
+import math
+
 import librosa
 import librosa.display
 import numpy as np
 import matplotlib.pyplot as plt
 
 from typing import Tuple, Dict, Any
+
+
+def round_half_up(value: float, decimals: int = 0) -> float:
+    """
+    Round a value using "round half up" semantics instead of
+    Python's default banker's rounding (round half to even).
+
+    Example:
+        round_half_up(128.5) -> 129
+        round_half_up(128.4) -> 128
+        round_half_up(128.45, 1) -> 128.5
+    """
+    factor = 10 ** decimals
+    return math.floor(value * factor + 0.5) / factor
 
 
 class TempoAnalyzer:
@@ -45,6 +61,11 @@ class TempoAnalyzer:
         # Convert possible ndarray to scalar
         tempo = float(np.asarray(tempo).squeeze())
 
+        # Round the tempo up when the first decimal digit is >= 5
+        # (e.g. 128.5 -> 129, 128.4 -> 128), instead of relying on
+        # Python's default round-half-to-even behavior.
+        tempo = round_half_up(tempo)
+
         # Onset strength
         onset_env = librosa.onset.onset_strength(
             y=y,
@@ -60,6 +81,8 @@ class TempoAnalyzer:
         tempo_onset = float(
             np.asarray(tempo_onset).squeeze()
         )
+
+        tempo_onset = round_half_up(tempo_onset)
 
         # Beat timestamps
         beat_times = librosa.frames_to_time(
@@ -153,6 +176,7 @@ class TempoAnalyzer:
         )
 
         tempo = float(np.asarray(tempo).squeeze())
+        tempo = round_half_up(tempo)
 
         beat_times = librosa.frames_to_time(
             beats,
