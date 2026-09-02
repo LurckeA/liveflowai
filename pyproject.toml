@@ -5,7 +5,7 @@ description = "A Python-based audio analysis toolkit for real-time tempo and cho
 readme = "README.md"
 authors = [
     { name = "Hioe Gregorius Owen", email = "bloggerzz231@gmail.com" },
-    { name = "Petrus Aria Prakoso Widarto", email = "ariaprks@gmail.com" }
+    { name = "Petrus Aria Prakoso Widarto", email = "ariaprakoso@proton.me" }
 ]
 requires-python = ">=3.10"
 dependencies = [
