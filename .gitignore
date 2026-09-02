@@ -70,3 +70,6 @@ Thumbs.db
 
 #DB
 *.db
+
+# Github
+.github/
