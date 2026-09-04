@@ -1,6 +1,6 @@
 [project]
 name = "liveflowai"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python-based audio analysis toolkit for real-time tempo and chord detection from music files and live microphone input."
 readme = "README.md"
 authors = [
