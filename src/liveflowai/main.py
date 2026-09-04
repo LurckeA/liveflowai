@@ -1,7 +1,5 @@
 # src/liveflowai/main.py
 
-from pathlib import Path
-
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
@@ -343,13 +341,7 @@ def main():
     # Setup audio selector
     # ---------------------------------------------------------
 
-    PROJECT_ROOT = (
-        Path(__file__).resolve().parents[2]
-    )
-
-    audio_selector = AudioFileSelector(
-        base_dir=PROJECT_ROOT
-    )
+    audio_selector = AudioFileSelector()
 
     # ---------------------------------------------------------
     # Initialize database

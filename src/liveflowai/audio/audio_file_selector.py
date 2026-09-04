@@ -5,7 +5,7 @@ from pathlib import Path
 
 class AudioFileSelector:
     """
-    Interactive selector for audio files stored in data/songs/.
+    Interactive selector for audio files in a user-selected directory.
     """
 
     SUPPORTED_EXTENSIONS = {
@@ -18,11 +18,13 @@ class AudioFileSelector:
         ".wma",
     }
 
-    def __init__(self, base_dir=None):
+    def __init__(self, base_dir=None, audio_dir=None):
         """
         Args:
             base_dir: Project root directory. If None, automatically
                       determines the project root.
+            audio_dir: Directory containing audio files. If provided,
+                       it may be absolute or relative to base_dir.
         """
 
         if base_dir is None:
@@ -30,11 +32,33 @@ class AudioFileSelector:
         else:
             self.project_root = Path(base_dir).resolve()
 
-        self.audio_dir = self.project_root / "data" / "songs"
+        if audio_dir is None:
+            self.audio_dir = self.project_root / "data" / "songs"
+        else:
+            selected_dir = Path(audio_dir).expanduser()
+            if not selected_dir.is_absolute():
+                selected_dir = self.project_root / selected_dir
+            self.audio_dir = selected_dir.resolve()
+
+    def choose_directory(self):
+        """Ask the user which directory contains the song files."""
+
+        current_directory = Path.cwd()
+        choice = input(
+            "\nEnter the folder containing your songs "
+            f"(default: {current_directory}): "
+        ).strip()
+
+        selected_dir = Path(choice or current_directory).expanduser()
+        if not selected_dir.is_absolute():
+            selected_dir = current_directory / selected_dir
+
+        self.audio_dir = selected_dir.resolve()
+        print(f"\nUsing audio folder: {self.audio_dir}")
 
     def get_audio_files(self):
         """
-        Return all supported audio files in data/songs/.
+        Return all supported audio files in the selected directory.
         """
 
         if not self.audio_dir.exists():
@@ -138,6 +162,8 @@ class AudioFileSelector:
         """
 
         selected_files = []
+
+        self.choose_directory()
 
         while True:
             selected_file = self.select_file()

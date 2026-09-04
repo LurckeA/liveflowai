@@ -23,14 +23,34 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/liveflowai.git
-   cd liveflowai
-   ```
+1. **Install from PyPI**
+  ```bash
+  python -m pip install liveflowai
+  ```
 
-2. **Set up Python environment**
+2. **Install system audio support**
+
+  FFmpeg is required for common compressed audio formats. Live microphone
+  input also requires a working PortAudio installation and microphone.
+
+3. **Start LiveFlowAI**
+  ```bash
+  liveflowai
+  # Or:
+  python -m liveflowai
+  ```
+
+  When you choose **Analyze Audio Files**, enter the full path to the folder
+  containing your songs. The application scans that folder for supported
+  audio files; songs do not need to be copied into the installation directory.
+
+### Development Installation
+
+For contributors, clone the repository and set up a development environment:
    ```bash
+  git clone https://github.com/yourusername/liveflowai.git
+  cd liveflowai
+
    # Using uv (recommended)
    uv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -41,16 +61,6 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
    source venv/bin/activate
    pip install -e .
    ```
-
-### Basic Usage
-
-```bash
-# Run the interactive analysis tool
-python -m liveflowai
-
-# Or using the installed command
-liveflowai
-```
 
 The tool presents an interactive menu with options to:
 - Analyze audio files from your system
@@ -82,10 +92,11 @@ chords = chord_analyzer.analyze_chords(audio_file)
 for chord in chords:
     print(f"{chord.timestamp:.2f}s: {chord}")
 
-# Store results
+# Store results. The database location is configurable with
+# LIVEFLOWAI_DATA_DIR and defaults to a per-user data directory.
 db.MakeDB()
 db.PushDB(
-    filename="song.mp3",
+  song="song.mp3",
     duration=tempo_data['duration'],
     bpm=tempo_data['tempo_bpm'],
     chords=", ".join(str(c) for c in chords)
@@ -110,8 +121,8 @@ liveflowai/
 │   │   └── iem_manager.py  # IEM announcements
 │   ├── transition/         # Audio transition analysis
 │   └── main.py             # CLI entry point
-├── config/                 # Configuration files
-├── data/                   # Data storage (databases, audio files)
+├── config/                 # Optional configuration files
+├── data/                   # Local development data only
 ├── tests/                  # Unit tests
 └── pyproject.toml          # Project metadata and dependencies
 ```
@@ -161,8 +172,9 @@ pytest tests/
 
 ### Project Structure Notes
 
-- The database is stored in `data/liveflow.db`
-- Put song files specifically in `data/songs/` before running the analysis tool
+- When analyzing files, enter any folder on your system that contains your songs.
+- Analysis data is stored in the per-user data directory by default. Set
+  `LIVEFLOWAI_DATA_DIR` to choose a different location for the database.
 - Visualizations are generated in the output directory
 - The project uses `uv_build` as the build backend
 

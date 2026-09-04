@@ -1,21 +1,35 @@
 # src/liveflowai/database/database.py
 
-from pathlib import Path
+import os
 import sqlite3
+from pathlib import Path
 
 
 class DatabaseLogic:
     def __init__(self):
-        # database.py
-        #   -> database/
-        #   -> liveflowai/
-        #   -> src/
-        #   -> project root
-        self.db_path = (
-            Path(__file__).resolve().parents[3]
-            / "data"
-            / "liveflow.db"
+        data_dir = os.environ.get(
+            "LIVEFLOWAI_DATA_DIR",
+            self._default_data_dir(),
         )
+        self.db_path = Path(data_dir).expanduser() / "liveflow.db"
+
+    @staticmethod
+    def _default_data_dir():
+        """Return a writable per-user data directory."""
+
+        if os.name == "nt":
+            return Path(
+                os.environ.get(
+                    "LOCALAPPDATA",
+                    Path.home() / "AppData" / "Local",
+                )
+            ) / "LiveFlowAI"
+
+        xdg_data_home = os.environ.get("XDG_DATA_HOME")
+        if xdg_data_home:
+            return Path(xdg_data_home) / "liveflowai"
+
+        return Path.home() / ".local" / "share" / "liveflowai"
 
     # ============================================================
     # CONNECT
