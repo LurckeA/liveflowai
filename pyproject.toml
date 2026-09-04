@@ -1,13 +1,13 @@
 [project]
 name = "liveflowai"
-version = "0.1.1"
+version = "0.1.2"
 description = "A Python-based audio analysis toolkit for real-time tempo and chord detection from music files and live microphone input."
 readme = "README.md"
 authors = [
     { name = "Hioe Gregorius Owen", email = "bloggerzz231@gmail.com" },
     { name = "Petrus Aria Prakoso Widarto", email = "ariaprakoso@proton.me" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.11"
 dependencies = [
     "librosa>=0.10.0",
     "numpy<2.0",
