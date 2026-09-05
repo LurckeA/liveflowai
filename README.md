@@ -157,7 +157,6 @@ Core dependencies include:
 - `librosa` - Audio analysis and processing
 - `numpy`, `scipy` - Numerical computations
 - `scikit-learn` - Machine learning utilities
-- `basic-pitch` - Pitch detection
 - `sounddevice` - Real-time audio I/O
 - `mido` - MIDI file support
 - `matplotlib` - Visualization
@@ -232,7 +231,6 @@ Copyright © 2026 bloggerzz231-jpg & Arialize
 
 Built with:
 - [Librosa](https://librosa.org/) - Audio analysis
-- [Basic Pitch](https://github.com/spotify/basic-pitch) - Pitch detection
 - [HarmonyScope](https://github.com/harmonic-analysis/harmonioscope) - Harmonic analysis
 - [Sonic Visualizer](https://www.sonicvisualiser.org/) - Visualization reference
 
