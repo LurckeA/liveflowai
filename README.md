@@ -17,7 +17,7 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.10 (the package currently requires `>=3.10, <3.11`)
 - `uv` package manager (or pip as alternative)
 - FFmpeg (for audio format support)
 
@@ -31,7 +31,9 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
 2. **Install system audio support**
 
   FFmpeg is required for common compressed audio formats. Live microphone
-  input also requires a working PortAudio installation and microphone.
+  input also requires a working PortAudio installation and microphone. On
+  Linux, `pyttsx3` may additionally require the `espeak` system package for
+  spoken IEM announcements.
 
 3. **Start LiveFlowAI**
   ```bash
@@ -40,9 +42,10 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
   python -m liveflowai
   ```
 
-  When you choose **Analyze Audio Files**, enter the full path to the folder
+  When you choose **Analyze Audio Files**, enter the path to the folder
   containing your songs. The application scans that folder for supported
   audio files; songs do not need to be copied into the installation directory.
+  Supported formats are MP3, WAV, FLAC, M4A, AAC, OGG, and WMA.
 
 ### Development Installation
 
@@ -63,10 +66,16 @@ For contributors, clone the repository and set up a development environment:
    ```
 
 The tool presents an interactive menu with options to:
-- Analyze audio files from your system
-- View all analyzed songs and their data
-- Store results in the local database
-- Visualize tempo patterns
+- Analyze one or more audio files from a selected folder
+- View analyzed songs, BPM, duration, and the first five detected chords
+- Start a live performance session using microphone input
+- Exit the application
+
+During a performance session, LiveFlowAI listens in 15-second windows,
+matches the recording against analyzed songs, announces a match through the
+IEM output, and starts a metronome at the stored song BPM. Press `Ctrl+C` to
+stop the session. Analyze at least one song first so the predictor has records
+to match against; performance mode cannot identify songs from an empty database.
 
 ### Example Workflow
 
@@ -92,8 +101,9 @@ chords = chord_analyzer.analyze_chords(audio_file)
 for chord in chords:
     print(f"{chord.timestamp:.2f}s: {chord}")
 
-# Store results. The database location is configurable with
-# LIVEFLOWAI_DATA_DIR and defaults to a per-user data directory.
+# Store results. The database location defaults to
+# ~/.local/share/liveflowai/liveflow.db on Linux. Set LIVEFLOWAI_DATA_DIR to
+# choose another directory before starting the application.
 db.MakeDB()
 db.PushDB(
   song="song.mp3",
@@ -139,7 +149,7 @@ liveflowai/
 
 ### Data Management
 - **DatabaseLogic**: SQLite database for storing analysis results with query methods
-- **AudioFileSelector**: Interactive file selection interface for batch processing
+- **AudioFileSelector**: Interactive folder and file selection for repeated analysis
 
 ## Dependencies
 
@@ -156,11 +166,20 @@ See [pyproject.toml](pyproject.toml) for the complete list and versions.
 
 ## Configuration
 
-Configuration can be customized in `config/config.yaml`. Currently minimal configuration is required, but this can be expanded for:
-- Sample rate settings
-- Analysis window sizes
-- Confidence thresholds
-- Output paths
+The default analysis sample rate is 22050 Hz. The SQLite database is stored in
+the platform's per-user data directory by default:
+
+- Linux: `~/.local/share/liveflowai/liveflow.db`
+- Windows: `%LOCALAPPDATA%/LiveFlowAI/liveflow.db`
+- macOS and other Unix-like systems: `~/.local/share/liveflowai/liveflow.db`
+
+Set `LIVEFLOWAI_DATA_DIR` to choose a different directory, for example:
+
+```bash
+export LIVEFLOWAI_DATA_DIR="$HOME/.local/share/liveflowai-dev"
+```
+
+`config/config.yaml` is reserved for future application settings.
 
 ## Development
 
@@ -175,7 +194,7 @@ pytest tests/
 - When analyzing files, enter any folder on your system that contains your songs.
 - Analysis data is stored in the per-user data directory by default. Set
   `LIVEFLOWAI_DATA_DIR` to choose a different location for the database.
-- Visualizations are generated in the output directory
+- Tempo visualizations are displayed when each file is analyzed
 - The project uses `uv_build` as the build backend
 
 ## Troubleshooting
