@@ -1,5 +1,7 @@
 # src/liveflowai/main.py
 
+import os
+
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer
 from liveflowai.audio.chord_analyzer import ChordAnalyzer
 from liveflowai.detection.chord_detector import LiveChordDetector
@@ -274,7 +276,8 @@ def cli_main():
     )
 
     chord_detector = LiveChordDetector(
-        sample_rate=SAMPLE_RATE
+        sample_rate=SAMPLE_RATE,
+        model_path=os.environ.get("LIVEFLOWAI_CHORD_MODEL"),
     )
 
     # ---------------------------------------------------------

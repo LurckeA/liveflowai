@@ -76,11 +76,15 @@ class TestMain(unittest.TestCase):
         mock_song_predictor,
         mock_iem_manager,
     ):
-        cli_main()
+        with patch.dict("os.environ", {"LIVEFLOWAI_CHORD_MODEL": "model.joblib"}):
+            cli_main()
 
         mock_tempo_analyzer.assert_called_once_with(sample_rate=22050)
         mock_chord_analyzer.assert_called_once_with(sample_rate=22050)
-        mock_chord_detector.assert_called_once_with(sample_rate=22050)
+        mock_chord_detector.assert_called_once_with(
+            sample_rate=22050,
+            model_path="model.joblib",
+        )
         mock_audio_selector.assert_called_once()
         mock_database.return_value.MakeDB.assert_called_once_with()
         mock_iem_manager.return_value.shutdown.assert_called_once_with()
@@ -291,6 +295,40 @@ class TestLiveChordDetector(unittest.TestCase):
 
         self.assertIsNone(chord)
         self.assertEqual(confidence, 0.0)
+
+    def test_detect_chord_uses_loaded_model_probabilities(self):
+        class FakeModel:
+            classes_ = np.array(["Am", "C"])
+
+            def predict_proba(self, features):
+                self.features = features
+                return np.array([[0.15, 0.85]])
+
+        model = FakeModel()
+        self.detector.ml_model = model
+        chroma = np.full(12, 1 / 12, dtype=np.float32)
+
+        chord, confidence = self.detector._detect_chord(chroma)
+
+        self.assertEqual(chord, "C")
+        self.assertAlmostEqual(confidence, 0.85)
+        self.assertEqual(model.features.shape, (1, 12))
+
+    def test_detect_chord_rejects_low_confidence_model_prediction(self):
+        class FakeModel:
+            classes_ = np.array(["Am", "C"])
+
+            def predict_proba(self, features):
+                return np.array([[0.52, 0.48]])
+
+        self.detector.ml_model = FakeModel()
+
+        chord, confidence = self.detector._detect_chord(
+            np.full(12, 1 / 12, dtype=np.float32)
+        )
+
+        self.assertIsNone(chord)
+        self.assertAlmostEqual(confidence, 0.52)
 
     def test_smooth_prediction_requires_consistent_history(self):
         first = self.detector._smooth_prediction("C", 0.8)

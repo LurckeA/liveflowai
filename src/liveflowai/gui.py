@@ -6,6 +6,7 @@ server, browser, or additional UI dependency to configure.
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from tkinter import END, StringVar, Tk, filedialog, messagebox, ttk
@@ -32,7 +33,10 @@ class LiveFlowApp:
 
         self.tempo_analyzer = TempoAnalyzer(sample_rate=22050)
         self.chord_analyzer = ChordAnalyzer(sample_rate=22050)
-        self.chord_detector = LiveChordDetector(sample_rate=22050)
+        self.chord_detector = LiveChordDetector(
+            sample_rate=22050,
+            model_path=os.environ.get("LIVEFLOWAI_CHORD_MODEL"),
+        )
         self.database = DatabaseLogic()
         self.database.MakeDB()
         self.iem_manager = IEMManager()

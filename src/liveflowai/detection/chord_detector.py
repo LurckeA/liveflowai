@@ -3,10 +3,12 @@
 import queue
 import time
 from collections import Counter, deque
-from typing import Optional, Tuple, List
+from pathlib import Path
+from typing import Optional, Tuple, List, Union
 
-import librosa
 import numpy as np
+
+from liveflowai.audio.chord_features import extract_chroma_features
 
 
 def _sounddevice():
@@ -126,6 +128,8 @@ class LiveChordDetector:
         minimum_confidence: float = 0.45,
         refinement_margin: float = 0.10,
         history_size: int = 5,
+        model_path: Optional[Union[str, Path]] = None,
+        ml_confidence_threshold: float = 0.55,
     ):
         self.sample_rate = sample_rate
         self.block_size = block_size
@@ -133,6 +137,41 @@ class LiveChordDetector:
         self.silence_threshold = silence_threshold
         self.minimum_confidence = minimum_confidence
         self.refinement_margin = refinement_margin
+        self.ml_confidence_threshold = ml_confidence_threshold
+        self.ml_model = None
+
+        if model_path is not None:
+            try:
+                import joblib
+            except ImportError as error:
+                raise RuntimeError(
+                    "Loading a chord ML model requires the 'ml' extra. "
+                    "Install it with: uv sync --extra ml"
+                ) from error
+
+            model_artifact = joblib.load(model_path)
+            if (
+                not isinstance(model_artifact, dict)
+                or model_artifact.get("feature_version") != 1
+                or model_artifact.get("sample_rate") != self.sample_rate
+                or "model" not in model_artifact
+            ):
+                raise ValueError(
+                    "The chord model is incompatible with this detector "
+                    "or uses an unsupported feature version."
+                )
+            model = model_artifact["model"]
+            if (
+                not callable(getattr(model, "predict_proba", None))
+                or np.asarray(getattr(model, "classes_", [])).ndim != 1
+                or len(getattr(model, "classes_", [])) < 2
+                or getattr(model, "n_features_in_", None) != 12
+            ):
+                raise ValueError(
+                    "The chord model must be a fitted classifier with "
+                    "predict_proba, at least two classes, and 12 input features."
+                )
+            self.ml_model = model
 
         self.audio_queue = queue.Queue()
 
@@ -281,59 +320,17 @@ class LiveChordDetector:
         audio: np.ndarray,
     ) -> Optional[np.ndarray]:
         """Convert microphone audio into a chroma vector."""
-
-        if len(audio) < 1024:
-            return None
-
-        rms = float(
-            np.sqrt(
-                np.mean(audio ** 2)
-            )
-        )
-
-        # Silence.
-        if rms < self.silence_threshold:
-            return None
-
-        # Remove DC offset.
-        audio = audio - np.mean(audio)
-
-        peak = np.max(np.abs(audio))
-
-        if peak > 1e-8:
-            audio = audio / peak
-
         try:
-            # Reduce drums/percussion.
-            harmonic_audio, _ = librosa.effects.hpss(
-                audio
+            chroma = extract_chroma_features(
+                audio,
+                self.sample_rate,
             )
-
-            chroma = librosa.feature.chroma_stft(
-                y=harmonic_audio,
-                sr=self.sample_rate,
-                n_fft=2048,
-                hop_length=512,
-                n_chroma=12,
-            )
-
-            chroma_vector = np.mean(
-                chroma,
-                axis=1,
-            )
-
-            total = np.sum(chroma_vector)
-
-            if total < 1e-8:
+            if chroma is None:
                 return None
-
-            chroma_vector = (
-                chroma_vector / total
-            )
-
-            return chroma_vector.astype(
-                np.float32
-            )
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            if rms < self.silence_threshold:
+                return None
+            return chroma
 
         except Exception as error:
             print(
@@ -633,6 +630,24 @@ class LiveChordDetector:
 
         if chroma is None:
             return None, 0.0
+
+        if self.ml_model is not None:
+            probabilities = np.asarray(self.ml_model.predict_proba(
+                np.asarray(chroma, dtype=np.float32).reshape(1, -1)
+            ), dtype=np.float64)
+            if (
+                probabilities.ndim != 2
+                or probabilities.shape != (1, len(self.ml_model.classes_))
+                or not np.all(np.isfinite(probabilities))
+                or np.any(probabilities < 0)
+            ):
+                raise ValueError("Chord model returned invalid class probabilities.")
+            probabilities = probabilities[0]
+            best_index = int(np.argmax(probabilities))
+            confidence = float(probabilities[best_index])
+            if confidence < self.ml_confidence_threshold:
+                return None, confidence
+            return str(self.ml_model.classes_[best_index]), confidence
 
         # Stage 1.
         root, family, basic_score = (

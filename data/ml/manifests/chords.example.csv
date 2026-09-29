@@ -1,0 +1,5 @@
+audio_path,chord,recording_id
+../audio/song-a-01.wav,C,recording-song-a
+../audio/song-a-02.wav,Am,recording-song-a
+../audio/song-b-01.wav,C,recording-song-b
+../audio/song-b-02.wav,Am,recording-song-b

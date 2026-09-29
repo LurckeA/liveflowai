@@ -12,6 +12,7 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
 - **IEM Integration**: Announce song information for in-ear monitor systems
 - **Multi-file Processing**: Batch analyze multiple audio files
 - **Confidence Metrics**: Get confidence scores for all detections
+- **Optional ML Chord Classifier**: Train a scikit-learn model from labeled audio segments and use it for live chord predictions
 
 ## Quick Start
 
@@ -165,13 +166,101 @@ liveflowai/
 
 Core dependencies include:
 - `librosa` - Audio analysis and processing
-- `numpy`, `scipy` - Numerical computations
-- `scikit-learn` - Machine learning utilities
-- `sounddevice` - Real-time audio I/O
-- `mido` - MIDI file support
+- `numpy` - Numerical computations
 - `matplotlib` - Visualization
 
+Optional dependency groups:
+- `live-audio` - `sounddevice` for real-time microphone input
+- `ml` - `scikit-learn` and `joblib` for the optional learned chord classifier
+- `iem` - `pyttsx3` for speech announcements
+
 See [pyproject.toml](pyproject.toml) for the complete list and versions.
+
+## Optional ML Chord Model
+
+The default detector remains the existing rule-based chroma matcher. To train
+and use the optional scikit-learn model, first install the `ml` extra:
+
+```bash
+uv sync --extra ml --group dev
+```
+
+Prepare a CSV manifest with one labeled chord segment per row and these columns:
+
+```csv
+audio_path,chord,recording_id
+segments/song-a-01.wav,C,recording-song-a
+segments/song-a-02.wav,Am,recording-song-a
+segments/song-b-01.wav,C,recording-song-b
+segments/song-b-02.wav,G,recording-song-b
+```
+
+Paths are relative to the manifest file or absolute. `recording_id` must identify
+the original song or recording, not an individual segment. The trainer holds out
+entire recording groups for testing, reducing the risk that near-identical
+segments from one recording appear in both train and test sets. Include multiple
+recordings per chord; a tiny dataset can produce unstable or unrepresentative
+metrics. Keep audio files and trained artifacts private unless you have the
+rights to redistribute them.
+
+The repository has a starter layout under `data/ml/`:
+
+- `audio/` — put short, labeled chord recordings here (WAV is recommended).
+- `manifests/chords.csv` — copy `manifests/chords.example.csv`, then add one
+  segment per row. Paths in the example are relative to the CSV file.
+- `models/` — default destination for locally trained model artifacts.
+
+To train your own classifier:
+
+1. Collect clean audio clips that each contain one chord. Include variety in
+   instruments, voicings, octaves, and recording sessions. Record the actual
+   chord symbol (for example `C`, `Am`, `G7`) in the manifest.
+2. Save clips in `data/ml/audio/` and edit the copied CSV. Use the same
+   `recording_id` for clips from one source song/session so they stay together
+   when the trainer makes its recording-level train/test split. Use at least
+   two source recordings per chord where possible.
+3. Install the optional ML dependencies and run training from the repository
+   root:
+
+   ```bash
+   uv sync --extra ml --group dev
+   uv run liveflowai-train-chords \
+     --manifest data/ml/manifests/chords.csv \
+     --output data/ml/models/chord_classifier.joblib
+   ```
+
+4. Review the held-out accuracy, macro F1, per-class report, and confusion
+   matrix printed by the command. Add more labeled recordings for classes with
+   weak results, then retrain. The model expects 12 chroma features at 22050 Hz
+   by default; if you change `--sample-rate`, detector sample rate must match.
+5. Set the environment variable and start the app to enable that model:
+
+   ```bash
+   export LIVEFLOWAI_CHORD_MODEL="$PWD/data/ml/models/chord_classifier.joblib"
+   uv run liveflowai
+   ```
+
+The dataset recordings and generated `.joblib` files are local training data
+and are ignored by git. Keep the example manifest tracked as a template.
+
+The command saves the artifact at the requested output path and prints held-out
+accuracy, macro F1, a per-class report, and a confusion matrix. The model is
+not included with the package; these results are produced from the dataset you
+provide and are not pre-claimed project results.
+
+To use the trained model in the desktop or terminal app, set its path before
+launching:
+
+```bash
+export LIVEFLOWAI_CHORD_MODEL="$PWD/data/models/chord_classifier.joblib"
+uv run liveflowai
+```
+
+The model is trained on 12-bin librosa chroma features, not raw audio and not a
+separate noise-denoising model. The detector rejects predictions below its
+confidence threshold; temporal smoothing is still applied afterward. Evaluate
+the model on recordings representative of the intended microphone, room, and
+instrument conditions before presenting its performance.
 
 ## Configuration
 
