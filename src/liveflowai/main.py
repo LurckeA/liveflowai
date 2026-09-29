@@ -7,6 +7,7 @@ from liveflowai.detection.song_predictor import SongPredictor
 from liveflowai.audio.audio_file_selector import AudioFileSelector
 from liveflowai.output.iem_manager import IEMManager
 from liveflowai.database.database import DatabaseLogic
+from liveflowai.ui import ConsoleUI
 
 
 def analyze_audio_file(
@@ -19,10 +20,8 @@ def analyze_audio_file(
     """Analyze a single audio file and store results in database."""
 
     try:
-        print(
-            f"\n=== Analyzing: "
-            f"{file_path.name} ==="
-        )
+        ui = ConsoleUI()
+        ui.header("Analysis", file_path.name, "Extracting tempo, beat confidence, and harmonic progression.")
 
         # ---------------------------------------------------------
         # Detect tempo
@@ -32,19 +31,15 @@ def analyze_audio_file(
             file_path
         )
 
-        print(
-            f"Tempo: "
-            f"{tempo_result['tempo_bpm']:.2f} BPM"
-        )
-
-        print(
-            f"Duration: "
-            f"{tempo_result['duration']:.2f} seconds"
-        )
-
-        print(
-            f"Number of beats: "
-            f"{tempo_result['num_beats']}"
+        ui.table(
+            ("TEMPO", "DURATION", "BEATS"),
+            [
+                (
+                    f"{tempo_result['tempo_bpm']:.0f} BPM",
+                    ui.format_duration(tempo_result["duration"]),
+                    str(tempo_result["num_beats"]),
+                )
+            ],
         )
 
         # ---------------------------------------------------------
@@ -57,10 +52,7 @@ def analyze_audio_file(
             )
         )
 
-        print(
-            f"Confidence score: "
-            f"{confidence['confidence_score']:.2f}"
-        )
+        ui.status(f"Beat confidence: {confidence['confidence_score']:.0%}")
 
         # ---------------------------------------------------------
         # Detect chords
@@ -70,16 +62,19 @@ def analyze_audio_file(
             file_path
         )
 
-        print("\nDetected Chords:")
-
-        for chord in chords:
-            print(
-                f"{chord.timestamp:.2f}s - "
-                f"{chord.timestamp + chord.duration:.2f}s: "
-                f"{chord} "
-                f"(confidence: "
-                f"{chord.confidence:.2%})"
-            )
+        print()
+        ui.table(
+            ("START", "END", "CHORD", "CONFIDENCE"),
+            (
+                (
+                    f"{chord.timestamp:.1f}s",
+                    f"{chord.timestamp + chord.duration:.1f}s",
+                    str(chord),
+                    f"{chord.confidence:.0%}",
+                )
+                for chord in chords
+            ),
+        )
 
         # ---------------------------------------------------------
         # Convert chords to database string
@@ -126,19 +121,13 @@ def analyze_audio_file(
             chords_string,
         )
 
-        print(
-            f"\n✓ Successfully analyzed and stored: "
-            f"{file_path.name}"
-        )
+        ui.status(f"Analysis saved to your song library: {file_path.name}", "success")
 
         return True
 
     except Exception as e:
 
-        print(
-            f"\n✗ Error analyzing "
-            f"{file_path.name}: {e}"
-        )
+        ConsoleUI().status(f"Could not analyze {file_path.name}: {e}", "error")
 
         return False
 
@@ -160,9 +149,7 @@ def analyze_audio_files(
         4. Return to the startup menu.
     """
 
-    print(
-        "\n=== ANALYZE AUDIO FILES ==="
-    )
+    ConsoleUI().header("Library", "Analyze songs", "Choose a folder, then add one or more audio files to the queue.")
 
     selected_files = (
         audio_selector.select_multiple()
@@ -170,17 +157,11 @@ def analyze_audio_files(
 
     if not selected_files:
 
-        print(
-            "\nNo audio files selected."
-        )
+        ConsoleUI().status("No audio files selected.", "warning")
 
         return
 
-    print(
-        f"\nSelected "
-        f"{len(selected_files)} "
-        f"audio file(s) for analysis."
-    )
+    ConsoleUI().status(f"{len(selected_files)} audio file(s) queued for analysis.")
 
     for file_path in selected_files:
 
@@ -192,38 +173,25 @@ def analyze_audio_files(
             iem_manager,
         )
 
-    print(
-        "\nReturning to startup menu..."
-    )
+    ConsoleUI().status("Returning to the dashboard.")
 
 
 def show_audio_files(db):
     """Display all audio files stored in the database."""
 
     try:
+        ui = ConsoleUI()
         files = db.FetchAllDB()
 
         if not files:
-
-            print(
-                "\nNo audio files found "
-                "in database.\n"
-            )
-
+            ui.header("Library", "Your analyzed songs", "Songs you analyze are saved here for performance matching.")
+            ui.status("Your library is empty. Analyze a song to get started.", "warning")
             return
 
-        print(
-            "\n=== Stored Audio Files ==="
-        )
-
-        for i, file in enumerate(
-            files,
-            1,
-        ):
-
-            song = file[0]
-            duration = file[1]
-            bpm = file[2]
+        ui.header("Library", "Your analyzed songs", f"{len(files)} song(s) ready for performance matching.")
+        rows = []
+        for i, file in enumerate(files, 1):
+            song, duration, bpm = file[0], file[1], file[2]
 
             # -------------------------------------------------
             # Fetch only the first five chords.
@@ -235,32 +203,16 @@ def show_audio_files(db):
                 )
             )
 
-            print(
-                f"{i}. {song} - "
-                f"{bpm:.2f} BPM - "
-                f"{duration:.2f}s"
-            )
+            rows.append((
+                str(i), song, f"{bpm:.0f}", ui.format_duration(duration),
+                ", ".join(first_five_chords) if first_five_chords else "—",
+            ))
 
-            if first_five_chords:
-
-                print(
-                    f"   First five chords: "
-                    f"{', '.join(first_five_chords)}"
-                )
-
-            else:
-
-                print(
-                    "   First five chords: None"
-                )
-
-            print()
+        ui.table(("#", "SONG", "BPM", "LENGTH", "OPENING CHORDS"), rows)
 
     except Exception as e:
 
-        print(
-            f"Error fetching files: {e}\n"
-        )
+        ConsoleUI().status(f"Could not load the song library: {e}", "error")
 
 
 def start_performance(
@@ -279,37 +231,20 @@ def start_performance(
 
     try:
 
-        print(
-            "\n=== Starting Performance ==="
-        )
-
-        print(
-            "Play your instrument. LiveFlowAI will listen in "
-            "15-second windows and try to identify the song."
-        )
-
-        print(
-            "Once a song is identified, the metronome will "
-            "start at its BPM."
-        )
-
-        print(
-            "Press Ctrl+C to stop...\n"
+        ConsoleUI().header(
+            "Performance mode", "Listening for your song",
+            "LiveFlowAI samples 15-second windows, identifies a match, and starts the stored tempo. Press Ctrl+C to stop.",
         )
 
         song_predictor.run_performance()
 
     except KeyboardInterrupt:
 
-        print(
-            "\nPerformance stopped."
-        )
+        ConsoleUI().status("Performance stopped.", "warning")
 
     except Exception as e:
 
-        print(
-            f"Error during performance: {e}"
-        )
+        ConsoleUI().status(f"Performance error: {e}", "error")
 
     finally:
 
@@ -317,7 +252,12 @@ def start_performance(
         iem_manager.stop_metronome()
 
 
-def main():
+def cli_main():
+    """Run the legacy terminal workflow.
+
+    The installed application starts the desktop GUI through :func:`main`.
+    This entry point remains available for scripts and terminal users.
+    """
 
     # ---------------------------------------------------------
     # Initialize analyzers
@@ -375,37 +315,23 @@ def main():
     # Startup menu
     # ---------------------------------------------------------
 
-    print(
-        "\n=== LIVEFLOWAI ==="
-    )
+    ui = ConsoleUI()
 
     while True:
 
         try:
 
-            print(
-                "\nSelect your option:"
+            ui.header(
+                "LiveFlowAI", "Live music intelligence",
+                "Analyze your catalog, then identify songs and drive the metronome live.",
             )
-
-            print(
-                "1. Analyze Audio Files"
-            )
-
-            print(
-                "2. Show Analyzed Audio Files"
-            )
-
-            print(
-                "3. Start Performance"
-            )
-
-            print(
-                "4. Exit"
-            )
-
-            user_input = input(
-                "Enter your choice (1-4): "
-            ).strip()
+            ui.menu([
+                ("1", "Analyze audio files", "Add songs and detect tempo, beats, and chords."),
+                ("2", "View song library", "Review analyzed songs and their opening chord progressions."),
+                ("3", "Start performance", "Listen through the microphone and match a song in real time."),
+                ("4", "Exit LiveFlowAI", "Close the application safely."),
+            ])
+            user_input = ui.prompt("Choose an option [1–4]:")
 
             # -------------------------------------------------
             # Option 1
@@ -450,36 +376,33 @@ def main():
 
                 iem_manager.shutdown()
 
-                print(
-                    "\nThank you for using "
-                    "LIVEFLOWAI!"
-                )
+                ui.status("Thanks for using LiveFlowAI. See you at soundcheck.", "success")
 
                 break
 
             else:
 
-                print(
-                    "Invalid choice. "
-                    "Please enter 1, 2, 3, or 4."
-                )
+                ui.status("Choose one of the numbered options (1–4).", "warning")
 
         except KeyboardInterrupt:
 
-            print(
-                "\n\nProgram interrupted. "
-                "Exiting..."
-            )
+            ui.status("Program interrupted. Exiting safely.", "warning")
 
             break
 
         except Exception as e:
 
-            print(
-                f"Unexpected error: {e}"
-            )
+            ui.status(f"Unexpected error: {e}", "error")
 
             continue
+
+
+def main():
+    """Launch the LiveFlowAI desktop application."""
+
+    from liveflowai.gui import launch_app
+
+    launch_app()
 
 
 if __name__ == "__main__":

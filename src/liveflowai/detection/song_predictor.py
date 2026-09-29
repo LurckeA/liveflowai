@@ -1,6 +1,7 @@
 # src/liveflowai/detection/song_predictor.py
 
 from collections import Counter
+from threading import Event
 from typing import Optional, List, Tuple
 
 
@@ -50,6 +51,7 @@ class SongPredictor:
         self.minimum_match = minimum_match
 
         self.last_recording = []
+        self._stop_requested = Event()
 
         print(
             "SongPredictor initialized."
@@ -647,6 +649,8 @@ class SongPredictor:
         so it propagates to the caller.
         """
 
+        self._stop_requested.clear()
+
         songs = (
             self.db.FetchAllFirstFiveChords()
         )
@@ -705,7 +709,7 @@ class SongPredictor:
         attempt = 1
         song_number = 1
 
-        while True:
+        while not self._stop_requested.is_set():
 
             print(
                 f"\n{'=' * 60}"
@@ -751,3 +755,10 @@ class SongPredictor:
                 "Recording another "
                 f"{self.recording_duration:.0f} seconds..."
             )
+
+        print("\nPerformance stopped.")
+
+    def stop_performance(self):
+        """Request that performance mode stops after its active recording window."""
+
+        self._stop_requested.set()

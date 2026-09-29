@@ -28,12 +28,19 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
   python -m pip install liveflowai
   ```
 
+   Add the optional live microphone and IEM speech integrations when needed:
+   ```bash
+   python -m pip install "liveflowai[live-audio,iem]"
+   ```
+
 2. **Install system audio support**
 
   FFmpeg is required for common compressed audio formats. Live microphone
-  input also requires a working PortAudio installation and microphone. On
+  input also requires the `live-audio` extra, a working PortAudio installation,
+  and microphone. On Linux, the desktop interface requires the system's
+  Tkinter package (commonly `python3-tk`). On
   Linux, `pyttsx3` may additionally require the `espeak` system package for
-  spoken IEM announcements.
+  spoken IEM announcements when the `iem` extra is installed.
 
 3. **Start LiveFlowAI**
   ```bash
@@ -42,9 +49,17 @@ A Python-based audio analysis toolkit for real-time tempo and chord detection fr
   python -m liveflowai
   ```
 
-  When you choose **Analyze Audio Files**, enter the path to the folder
-  containing your songs. The application scans that folder for supported
-  audio files; songs do not need to be copied into the installation directory.
+  LiveFlowAI opens as a desktop application with three clear areas:
+
+  - **Analyze songs** — choose a music folder, select tracks, and analyze them
+    without blocking the interface.
+  - **Song library** — review stored BPM, duration, and opening chords.
+  - **Performance** — listen through the microphone and match against your
+    analyzed library.
+
+  In **Analyze songs**, choose the folder containing your songs, select the
+  tracks you want, and start the analysis. Songs do not need to be copied into
+  the installation directory.
   Supported formats are MP3, WAV, FLAC, M4A, AAC, OGG, and WMA.
 
 ### Development Installation
@@ -57,7 +72,7 @@ For contributors, clone the repository and set up a development environment:
    # Using uv (recommended)
    uv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
-   uv sync
+   uv sync --all-extras --group dev
    
    # Or using pip
    python -m venv venv
@@ -65,17 +80,12 @@ For contributors, clone the repository and set up a development environment:
    pip install -e .
    ```
 
-The tool presents an interactive menu with options to:
-- Analyze one or more audio files from a selected folder
-- View analyzed songs, BPM, duration, and the first five detected chords
-- Start a live performance session using microphone input
-- Exit the application
-
 During a performance session, LiveFlowAI listens in 15-second windows,
 matches the recording against analyzed songs, announces a match through the
 IEM output, and starts a metronome at the stored song BPM. Press `Ctrl+C` to
-stop the session. Analyze at least one song first so the predictor has records
-to match against; performance mode cannot identify songs from an empty database.
+stop the terminal workflow, or use **Stop after current window** in the desktop
+app. Analyze at least one song first so the predictor has records to match
+against; performance mode cannot identify songs from an empty database.
 
 ### Example Workflow
 

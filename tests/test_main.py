@@ -2,7 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import librosa.beat
@@ -19,8 +19,41 @@ if str(SRC_DIR) not in sys.path:
 
 from liveflowai.audio.audio_file_selector import AudioFileSelector
 from liveflowai.audio.tempo_analyzer import TempoAnalyzer, round_half_up
-from liveflowai.detection.chord_detector import LiveChordDetector
-from liveflowai.main import main
+from liveflowai.detection.chord_detector import LiveChordDetector, _sounddevice
+from liveflowai.detection.song_predictor import SongPredictor
+from liveflowai.main import (
+    analyze_audio_file,
+    analyze_audio_files,
+    cli_main,
+    main,
+    show_audio_files,
+    start_performance,
+)
+from liveflowai.ui import ConsoleUI
+
+
+class TestConsoleUI(unittest.TestCase):
+    def setUp(self):
+        self.ui = ConsoleUI()
+        self.ui._enabled = False
+
+    def test_format_duration_handles_minutes_and_negative_values(self):
+        self.assertEqual(self.ui.format_duration(0), "0:00")
+        self.assertEqual(self.ui.format_duration(65.2), "1:05")
+        self.assertEqual(self.ui.format_duration(-10), "0:00")
+
+    @patch("builtins.print")
+    def test_table_renders_generator_rows(self, mock_print):
+        self.ui.table(("SONG", "BPM"), (("demo.mp3", "128") for _ in range(1)))
+
+        rendered_lines = [call.args[0] for call in mock_print.call_args_list]
+        self.assertIn("SONG      BPM", rendered_lines)
+        self.assertIn("demo.mp3  128", rendered_lines)
+
+    @patch("builtins.input", return_value="  2  ")
+    def test_prompt_strips_input(self, mock_input):
+        self.assertEqual(self.ui.prompt("Choose:"), "2")
+        mock_input.assert_called_once_with("Choose: ")
 
 
 class TestMain(unittest.TestCase):
@@ -43,7 +76,7 @@ class TestMain(unittest.TestCase):
         mock_song_predictor,
         mock_iem_manager,
     ):
-        main()
+        cli_main()
 
         mock_tempo_analyzer.assert_called_once_with(sample_rate=22050)
         mock_chord_analyzer.assert_called_once_with(sample_rate=22050)
@@ -58,6 +91,118 @@ class TestMain(unittest.TestCase):
             segment_duration=1.0,
             iem_manager=mock_iem_manager.return_value,
         )
+
+    @patch("liveflowai.main.start_performance")
+    @patch("liveflowai.main.show_audio_files")
+    @patch("liveflowai.main.analyze_audio_files")
+    @patch("liveflowai.main.IEMManager")
+    @patch("liveflowai.main.SongPredictor")
+    @patch("liveflowai.main.DatabaseLogic")
+    @patch("liveflowai.main.AudioFileSelector")
+    @patch("liveflowai.main.LiveChordDetector")
+    @patch("liveflowai.main.ChordAnalyzer")
+    @patch("liveflowai.main.TempoAnalyzer")
+    @patch("builtins.input", side_effect=["1", "2", "3", "4"])
+    def test_main_routes_each_dashboard_action(
+        self,
+        _mock_input,
+        _mock_tempo,
+        _mock_chord_analyzer,
+        _mock_detector,
+        _mock_selector,
+        mock_database,
+        _mock_predictor,
+        _mock_iem,
+        mock_analyze,
+        mock_show,
+        mock_performance,
+    ):
+        cli_main()
+
+        mock_analyze.assert_called_once()
+        mock_show.assert_called_once_with(mock_database.return_value)
+        mock_performance.assert_called_once()
+
+    @patch("liveflowai.gui.launch_app")
+    def test_main_launches_desktop_application(self, mock_launch_app):
+        main()
+
+        mock_launch_app.assert_called_once_with()
+
+
+class TestGuiLauncher(unittest.TestCase):
+    @patch("liveflowai.gui.LiveFlowApp")
+    @patch("liveflowai.gui.Tk")
+    def test_launch_app_builds_and_runs_tk_application(self, mock_tk, mock_app):
+        from liveflowai.gui import launch_app
+
+        launch_app()
+
+        mock_app.assert_called_once_with(mock_tk.return_value)
+        mock_tk.return_value.mainloop.assert_called_once_with()
+
+
+class TestMainWorkflows(unittest.TestCase):
+    @patch("liveflowai.main.ConsoleUI")
+    def test_analyze_audio_file_stores_and_announces_results(self, mock_ui):
+        file_path = Path("set-one.mp3")
+        analyzer = MagicMock()
+        analyzer.detect_tempo.return_value = {
+            "tempo_bpm": 128.0,
+            "duration": 245.0,
+            "num_beats": 521,
+        }
+        analyzer.get_beat_confidence.return_value = {"confidence_score": 0.91}
+        chord = MagicMock(timestamp=1.0, duration=2.0, confidence=0.8)
+        chord.__str__.return_value = "Am"
+        chord_analyzer = MagicMock()
+        chord_analyzer.analyze_chords.return_value = [chord]
+        database = MagicMock()
+        iem_manager = MagicMock()
+
+        success = analyze_audio_file(
+            file_path, analyzer, chord_analyzer, database, iem_manager
+        )
+
+        self.assertTrue(success)
+        analyzer.visualize_tempo.assert_called_once_with(file_path)
+        database.PushDB.assert_called_once_with("set-one.mp3", 245.0, 128.0, "Am")
+        iem_manager.announce_next_song.assert_called_once()
+        mock_ui.return_value.table.assert_called()
+
+    @patch("liveflowai.main.ConsoleUI")
+    def test_analyze_audio_files_returns_without_selection(self, mock_ui):
+        selector = MagicMock()
+        selector.select_multiple.return_value = []
+
+        analyze_audio_files(selector, MagicMock(), MagicMock(), MagicMock(), MagicMock())
+
+        mock_ui.return_value.status.assert_called_with("No audio files selected.", "warning")
+
+    @patch("liveflowai.main.ConsoleUI")
+    def test_show_audio_files_displays_a_library_table(self, mock_ui):
+        mock_ui.return_value.format_duration.return_value = "4:05"
+        database = MagicMock()
+        database.FetchAllDB.return_value = [
+            ("set-one.mp3", 245.0, 128.0, "Am, F", "2026-01-01"),
+        ]
+        database.FetchFirstFiveChords.return_value = ["Am", "F"]
+
+        show_audio_files(database)
+
+        headers, rows = mock_ui.return_value.table.call_args.args
+        self.assertEqual(headers, ("#", "SONG", "BPM", "LENGTH", "OPENING CHORDS"))
+        self.assertEqual(rows, [("1", "set-one.mp3", "128", "4:05", "Am, F")])
+
+    @patch("liveflowai.main.ConsoleUI")
+    def test_start_performance_always_stops_the_metronome(self, _mock_ui):
+        predictor = MagicMock()
+        manager = MagicMock()
+
+        start_performance(predictor, manager)
+
+        predictor.run_performance.assert_called_once_with()
+        manager.stop_metronome.assert_called_once_with()
 
 
 class TestTempoAnalyzer(unittest.TestCase):
@@ -164,6 +309,26 @@ class TestLiveChordDetector(unittest.TestCase):
             self.detector.stop_detection()
 
         self.assertFalse(self.detector.is_running)
+
+    @patch.dict(sys.modules, {"sounddevice": MagicMock()})
+    def test_sounddevice_is_loaded_only_when_requested(self):
+        backend = _sounddevice()
+
+        self.assertTrue(hasattr(backend, "InputStream"))
+
+    @patch("builtins.__import__", side_effect=ImportError("backend missing"))
+    def test_sounddevice_reports_a_clear_optional_dependency_error(self, _mock_import):
+        with self.assertRaisesRegex(RuntimeError, "optional sounddevice backend"):
+            _sounddevice()
+
+
+class TestSongPredictor(unittest.TestCase):
+    def test_stop_performance_sets_a_stop_request(self):
+        predictor = SongPredictor(MagicMock(), MagicMock())
+
+        predictor.stop_performance()
+
+        self.assertTrue(predictor._stop_requested.is_set())
 
 
 class TestAudioFileSelector(unittest.TestCase):

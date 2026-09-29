@@ -10,23 +10,21 @@ authors = [
 requires-python = ">=3.10, <3.11"
 dependencies = [
     "librosa>=0.10.0",
-    "numpy<2.0",
-    "scipy>=1.13.0",
-    "scikit-learn>=1.4.0",
-    "harmonyscope>=1.0.0",
-    "soundfile>=0.12.0",
-    "audioread>=3.0.0",
-    "resampy>=0.4.0",
-    "cython>=0.25",
-    "mido>=1.2.6",
+    "numpy>=1.22,<2.0",
     "matplotlib>=3.10.9",
-    "ffmpeg-python>=0.2.0",
-    "pathlib>=1.0.1",
-    "typing>=3.10.0.0",
-    "pyaudio>=0.2.14",
-    "pytest>=9.1.1",
+]
+
+[project.optional-dependencies]
+live-audio = [
     "sounddevice>=0.5.5",
+]
+iem = [
     "pyttsx3>=2.99",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
 ]
 
 [project.scripts]

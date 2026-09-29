@@ -7,7 +7,22 @@ from typing import Optional, Tuple, List
 
 import librosa
 import numpy as np
-import sounddevice as sd
+
+
+def _sounddevice():
+    """Load the optional microphone backend only when live capture starts.
+
+    Keeping this import out of module initialization makes the analysis and UI
+    commands usable on systems where probing PortAudio is slow or unavailable.
+    """
+
+    try:
+        import sounddevice
+    except ImportError as error:
+        raise RuntimeError(
+            "Live microphone input requires the optional sounddevice backend."
+        ) from error
+    return sounddevice
 
 
 class LiveChordDetector:
@@ -811,7 +826,7 @@ class LiveChordDetector:
         start_time = time.time()
 
         try:
-            with sd.InputStream(
+            with _sounddevice().InputStream(
                 samplerate=self.sample_rate,
                 blocksize=self.block_size,
                 channels=1,
@@ -1006,7 +1021,7 @@ class LiveChordDetector:
         print("Press Ctrl+C to stop.\n")
 
         try:
-            with sd.InputStream(
+            with _sounddevice().InputStream(
                 samplerate=self.sample_rate,
                 blocksize=self.block_size,
                 channels=1,
@@ -1143,4 +1158,4 @@ class LiveChordDetector:
     def list_audio_devices():
         """Print available microphone devices."""
 
-        print(sd.query_devices())
+        print(_sounddevice().query_devices())
