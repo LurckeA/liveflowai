@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from liveflowai.ui import ConsoleUI
+
 
 class AudioFileSelector:
     """
@@ -18,7 +20,7 @@ class AudioFileSelector:
         ".wma",
     }
 
-    def __init__(self, base_dir=None, audio_dir=None):
+    def __init__(self, base_dir=None, audio_dir=None, ui=None):
         """
         Args:
             base_dir: Project root directory. If None, automatically
@@ -40,21 +42,23 @@ class AudioFileSelector:
                 selected_dir = self.project_root / selected_dir
             self.audio_dir = selected_dir.resolve()
 
+        self.ui = ui or ConsoleUI()
+
     def choose_directory(self):
         """Ask the user which directory contains the song files."""
 
         current_directory = Path.cwd()
-        choice = input(
-            "\nEnter the folder containing your songs "
-            f"(default: {current_directory}): "
-        ).strip()
+        choice = self.ui.prompt(
+            "Folder containing your songs "
+            f"[default: {current_directory}]:"
+        )
 
         selected_dir = Path(choice or current_directory).expanduser()
         if not selected_dir.is_absolute():
             selected_dir = current_directory / selected_dir
 
         self.audio_dir = selected_dir.resolve()
-        print(f"\nUsing audio folder: {self.audio_dir}")
+        self.ui.status(f"Using audio folder: {self.audio_dir}")
 
     def get_audio_files(self):
         """
@@ -62,8 +66,7 @@ class AudioFileSelector:
         """
 
         if not self.audio_dir.exists():
-            print(f"\nAudio directory does not exist:")
-            print(f"  {self.audio_dir}")
+            self.ui.status(f"Audio directory does not exist: {self.audio_dir}", "error")
             return []
 
         audio_files = [
@@ -80,12 +83,12 @@ class AudioFileSelector:
         Display all available audio files with numbers.
         """
 
-        print("\n=== Available Audio Files ===")
-
-        for index, file_path in enumerate(audio_files, start=1):
-            print(f"{index}. {file_path.name}")
-
-        print("=============================")
+        self.ui.header("Song picker", "Available audio files", "Choose one file at a time to build an analysis queue.")
+        self.ui.table(
+            ("#", "FILE", "FORMAT"),
+            ((str(index), file_path.name, file_path.suffix.upper().lstrip("."))
+             for index, file_path in enumerate(audio_files, start=1)),
+        )
 
     def select_file(self):
         """
@@ -98,17 +101,15 @@ class AudioFileSelector:
         audio_files = self.get_audio_files()
 
         if not audio_files:
-            print("\nNo supported audio files found in:")
-            print(f"  {self.audio_dir}")
+            self.ui.status(f"No supported audio files found in: {self.audio_dir}", "warning")
             return None
 
         self.display_audio_files(audio_files)
 
         while True:
-            choice = input(
-                f"\nSelect an audio file (1-{len(audio_files)}) "
-                "or 'q' to cancel: "
-            ).strip()
+            choice = self.ui.prompt(
+                f"Select a file [1–{len(audio_files)}] or q to return:"
+            )
 
             if choice.lower() == "q":
                 return None
@@ -116,20 +117,17 @@ class AudioFileSelector:
             try:
                 index = int(choice) - 1
             except ValueError:
-                print("Invalid input. Please enter a number.")
+                self.ui.status("Enter a file number or q to return.", "warning")
                 continue
 
             if 0 <= index < len(audio_files):
                 selected_file = audio_files[index]
 
-                print(f"\nSelected: {selected_file.name}")
+                self.ui.status(f"Added to queue: {selected_file.name}", "success")
 
                 return selected_file
 
-            print(
-                f"Invalid selection. "
-                f"Please enter a number between 1 and {len(audio_files)}."
-            )
+            self.ui.status(f"Choose a number between 1 and {len(audio_files)}.", "warning")
 
     def ask_continue(self):
         """
@@ -141,9 +139,7 @@ class AudioFileSelector:
         """
 
         while True:
-            choice = input(
-                "\nDo you want to select another audio file? (y/n): "
-            ).strip().lower()
+            choice = self.ui.prompt("Add another file? [y/n]:").lower()
 
             if choice in {"y", "yes"}:
                 return True
@@ -151,7 +147,7 @@ class AudioFileSelector:
             if choice in {"n", "no"}:
                 return False
 
-            print("Please enter 'y' or 'n'.")
+            self.ui.status("Please enter y or n.", "warning")
 
     def select_multiple(self):
         """
