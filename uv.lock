@@ -570,7 +570,7 @@ wheels = [
 
 [[package]]
 name = "liveflowai"
-version = "0.1.2.post1"
+version = "0.1.2.post2"
 source = { editable = "." }
 dependencies = [
     { name = "audioread" },
