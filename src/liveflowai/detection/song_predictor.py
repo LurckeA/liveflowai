@@ -2,6 +2,7 @@
 
 from collections import Counter
 from threading import Event
+import time
 from typing import Optional, List, Tuple
 
 
@@ -511,6 +512,15 @@ class SongPredictor:
                 self.iem_manager.start_metronome(
                     bpm
                 )
+                # Let the announcement finish, then count in five beats.
+                # The song clock starts on beat five; resume matching ten
+                # seconds before its stored duration expires.
+                if duration and bpm and duration > 0:
+                    count_in = 5 * 60.0 / bpm
+                    if self._stop_requested.wait(count_in):
+                        return song
+                    until_detection = max(0.0, duration - 10.0)
+                    self._stop_requested.wait(until_detection)
         return song
 
     # ============================================================

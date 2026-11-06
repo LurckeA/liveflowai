@@ -185,6 +185,9 @@ class LiveChordDetector:
         self.prediction_history = deque(
             maxlen=history_size
         )
+        # Keep a bounded audit trail so developers can inspect live model
+        # decisions without retaining microphone audio or growing memory.
+        self.prediction_diagnostics = deque(maxlen=100)
 
         self.current_chord = None
         self.current_confidence = 0.0
@@ -629,6 +632,17 @@ class LiveChordDetector:
         """Run the complete chord detection pipeline."""
 
         if chroma is None:
+            self.prediction_diagnostics.append(
+                {
+                    "timestamp": time.time(),
+                    "source": "ml" if self.ml_model is not None else "template",
+                    "chord": None,
+                    "confidence": 0.0,
+                    "accepted": False,
+                    "reason": "no_usable_audio",
+                    "class_probabilities": {},
+                }
+            )
             return None, 0.0
 
         if self.ml_model is not None:
@@ -645,9 +659,28 @@ class LiveChordDetector:
             probabilities = probabilities[0]
             best_index = int(np.argmax(probabilities))
             confidence = float(probabilities[best_index])
+            chord = str(self.ml_model.classes_[best_index])
+            accepted = confidence >= self.ml_confidence_threshold
+            self.prediction_diagnostics.append(
+                {
+                    "timestamp": time.time(),
+                    "source": "ml",
+                    "chord": chord,
+                    "confidence": confidence,
+                    "accepted": accepted,
+                    "reason": None if accepted else "below_confidence_threshold",
+                    "threshold": self.ml_confidence_threshold,
+                    "class_probabilities": {
+                        str(label): float(probability)
+                        for label, probability in zip(
+                            self.ml_model.classes_, probabilities
+                        )
+                    },
+                }
+            )
             if confidence < self.ml_confidence_threshold:
                 return None, confidence
-            return str(self.ml_model.classes_[best_index]), confidence
+            return chord, confidence
 
         # Stage 1.
         root, family, basic_score = (
@@ -674,7 +707,32 @@ class LiveChordDetector:
             confidence
             < self.minimum_confidence
         ):
+            self.prediction_diagnostics.append(
+                {
+                    "timestamp": time.time(),
+                    "source": "template",
+                    "chord": chord_name,
+                    "confidence": confidence,
+                    "accepted": False,
+                    "reason": "below_confidence_threshold",
+                    "threshold": self.minimum_confidence,
+                    "class_probabilities": {},
+                }
+            )
             return None, confidence
+
+        self.prediction_diagnostics.append(
+            {
+                "timestamp": time.time(),
+                "source": "template",
+                "chord": chord_name,
+                "confidence": confidence,
+                "accepted": True,
+                "reason": None,
+                "threshold": self.minimum_confidence,
+                "class_probabilities": {},
+            }
+        )
 
         return chord_name, confidence
 
@@ -1164,6 +1222,14 @@ class LiveChordDetector:
             self.current_chord,
             self.current_confidence,
         )
+
+    def get_prediction_diagnostics(self) -> list[dict]:
+        """Return a snapshot of recent raw decisions before temporal smoothing.
+
+        ML entries include every class probability. Audio samples are never
+        included; the bounded history is intended for developer inspection.
+        """
+        return [dict(entry) for entry in self.prediction_diagnostics]
 
     # ============================================================
     # LIST AUDIO DEVICES

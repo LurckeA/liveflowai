@@ -171,6 +171,18 @@ class DatabaseLogic:
 
             return []
 
+    def DeleteSong(self, song):
+        """Remove one analyzed song from the library."""
+        try:
+            with self.ConnectDB() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM liveflow WHERE song = ?", (song,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error deleting song from DB: {e}")
+            return False
+
     # ============================================================
     # FETCH SONG INFO
     # ============================================================

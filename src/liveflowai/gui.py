@@ -128,6 +128,7 @@ class LiveFlowApp:
             self.library_tree.heading(key, text=title)
             self.library_tree.column(key, width=width, anchor="w" if key in {"song", "chords"} else "center")
         self.library_tree.pack(fill="both", expand=True)
+        ttk.Button(header, text="Remove selected", command=self.remove_selected_song).pack(side="right", padx=(0, 8))
 
     def _build_performance_tab(self) -> None:
         ttk.Label(self.performance_tab, text="Performance mode", style="Title.TLabel").pack(anchor="w")
@@ -199,6 +200,16 @@ class LiveFlowApp:
         for song, duration, bpm, _chords, _created_at in self.database.FetchAllDB():
             opening = ", ".join(self.database.FetchFirstFiveChords(song)) or "—"
             self.library_tree.insert("", END, values=(song, f"{bpm:.0f}", ConsoleUI.format_duration(duration), opening))
+
+    def remove_selected_song(self) -> None:
+        selection = self.library_tree.selection()
+        if not selection:
+            messagebox.showinfo("No song selected", "Select a song in the library to remove.", parent=self.root)
+            return
+        song = self.library_tree.item(selection[0], "values")[0]
+        if self.database.DeleteSong(song):
+            self.refresh_library()
+            self.status.set(f"Removed {song} from the analyzed song library.")
 
     def start_performance(self) -> None:
         if self.performance_running:
