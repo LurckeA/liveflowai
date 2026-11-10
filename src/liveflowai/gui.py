@@ -26,7 +26,7 @@ class LiveFlowApp:
 
     def __init__(self, root: Tk):
         self.root = root
-        self.root.title("LiveFlowAI — Live Music Intelligence")
+        self.root.title("LiveFlowAI")
         self.root.minsize(960, 640)
         self.root.geometry("1120x720")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
@@ -76,7 +76,7 @@ class LiveFlowApp:
         shell = ttk.Frame(self.root, padding=(30, 24))
         shell.pack(fill="both", expand=True)
         ttk.Label(shell, text="LIVEFLOWAI", style="Subtitle.TLabel").pack(anchor="w")
-        ttk.Label(shell, text="Live music intelligence", style="Title.TLabel").pack(anchor="w", pady=(2, 2))
+        ttk.Label(shell, text="Open-source live music assistant", style="Title.TLabel").pack(anchor="w", pady=(2, 2))
         ttk.Label(shell, text="Build a performance-ready song library and identify songs from live audio.", style="Subtitle.TLabel").pack(anchor="w", pady=(0, 18))
 
         self.tabs = ttk.Notebook(shell)
