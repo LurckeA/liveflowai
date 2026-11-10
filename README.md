@@ -203,6 +203,14 @@ recordings per chord; a tiny dataset can produce unstable or unrepresentative
 metrics. Keep audio files and trained artifacts private unless you have the
 rights to redistribute them.
 
+The trainer also accepts the compact two-column layout
+`file_path,chord_instrument_batch`. Encode the second cell as
+`chord|instrument|batch`, for example `Cminor|0|2`. Instrument codes are 0
+(acoustic guitar), 1 (electric guitar), and 2 (keyboard). Batch codes 0 and 1
+are block chords, 2 and 3 are top-to-bottom, and 4 is bottom-to-top. Compact
+rows are grouped by instrument and batch for the recording-level holdout. The
+expanded `audio_path,chord,instrument,batch` layout is also accepted.
+
 The repository has a starter layout under `data/ml/`:
 
 - `audio/` — put short, labeled chord recordings here (WAV is recommended).

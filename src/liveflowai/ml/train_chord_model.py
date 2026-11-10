@@ -17,6 +17,51 @@ from liveflowai.audio.chord_features import extract_chroma_features
 FEATURE_VERSION = 1
 
 
+def _manifest_example(row: dict[str, str], row_number: int) -> tuple[str, str, str]:
+    """Read supported manifest layouts and return path, label, and split group."""
+    path = (row.get("audio_path") or row.get("file_path") or "").strip()
+    if not path:
+        raise ValueError(f"Manifest row {row_number} needs audio_path or file_path.")
+
+    # Original layout: path,chord,recording_id.
+    if row.get("chord", "").strip():
+        label = row["chord"].strip()
+        recording_id = row.get("recording_id", "").strip()
+        if recording_id:
+            return path, label, recording_id
+
+        # Expanded layout: path,chord,instrument,batch. The instrument and
+        # batch identify a recording group for the grouped holdout.
+        instrument = (row.get("instrument") or "").strip()
+        batch = (row.get("batch") or "").strip()
+        if instrument and batch:
+            _validate_instrument_batch(instrument, batch, row_number)
+            return path, label, f"instrument-{instrument}-batch-{batch}"
+        raise ValueError(
+            f"Manifest row {row_number} needs recording_id or both instrument and batch."
+        )
+
+    # Compact layout: file_path,chord_instrument_batch. The metadata cell is
+    # chord|instrument|batch, e.g. Cminor|0|2.
+    combined = (row.get("chord_instrument_batch") or "").strip()
+    parts = combined.split("|")
+    if len(parts) != 3 or not all(part.strip() for part in parts):
+        raise ValueError(
+            f"Manifest row {row_number} chord_instrument_batch must use "
+            "the form chord|instrument|batch (for example Cminor|0|2)."
+        )
+    label, instrument, batch = (part.strip() for part in parts)
+    _validate_instrument_batch(instrument, batch, row_number)
+    return path, label, f"instrument-{instrument}-batch-{batch}"
+
+
+def _validate_instrument_batch(instrument: str, batch: str, row_number: int) -> None:
+    if instrument not in {"0", "1", "2"}:
+        raise ValueError(f"Manifest row {row_number} instrument must be 0, 1, or 2.")
+    if batch not in {"0", "1", "2", "3", "4"}:
+        raise ValueError(f"Manifest row {row_number} batch must be 0 through 4.")
+
+
 def train_model(
     manifest_path: Path,
     output_path: Path,
@@ -49,10 +94,16 @@ def train_model(
 
     with manifest_path.open(newline="", encoding="utf-8") as manifest_file:
         reader = csv.DictReader(manifest_file)
-        required_columns = {"audio_path", "chord", "recording_id"}
-        if not required_columns.issubset(reader.fieldnames or []):
+        columns = set(reader.fieldnames or [])
+        has_path = bool({"audio_path", "file_path"} & columns)
+        has_legacy = {"chord", "recording_id"}.issubset(columns)
+        has_expanded = {"chord", "instrument", "batch"}.issubset(columns)
+        has_compact = "chord_instrument_batch" in columns
+        if not has_path or not (has_legacy or has_expanded or has_compact):
             raise ValueError(
-                "Manifest must include audio_path, chord, and recording_id columns."
+                "Manifest must use audio_path or file_path and either "
+                "chord+recording_id, chord+instrument+batch, or "
+                "chord_instrument_batch columns."
             )
         rows = list(reader)
 
@@ -60,15 +111,10 @@ def train_model(
     labels: list[str] = []
     groups: list[str] = []
     for row_number, row in enumerate(rows, start=2):
-        audio_path = Path(row["audio_path"]).expanduser()
+        path_value, label, recording_id = _manifest_example(row, row_number)
+        audio_path = Path(path_value).expanduser()
         if not audio_path.is_absolute():
             audio_path = manifest_path.parent / audio_path
-        label = row["chord"].strip()
-        recording_id = row["recording_id"].strip()
-        if not label or not recording_id:
-            raise ValueError(
-                f"Manifest row {row_number} needs a chord label and recording_id."
-            )
         if not audio_path.is_file():
             raise FileNotFoundError(
                 f"Audio file from manifest row {row_number} not found: {audio_path}"
